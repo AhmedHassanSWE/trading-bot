@@ -1,0 +1,123 @@
+import ccxt, { Exchange, OHLCV } from 'ccxt';
+import { config } from '../config';
+import { logger } from '../utils/logger';
+import { Candle, OpenPosition, Side, WalletBalance } from '../types';
+
+export class ExchangeClient {
+  private exchange: Exchange;
+
+  constructor() {
+    this.exchange = new ccxt.binance({
+      apiKey: config.exchange.apiKey,
+      secret: config.exchange.apiSecret,
+      enableRateLimit: true,
+      options: {
+        defaultType: config.trading.mode === 'futures' ? 'future' : 'spot',
+        adjustForTimeDifference: true,
+      },
+    });
+
+    if (config.exchange.useTestnet) {
+      this.exchange.setSandboxMode(true);
+      logger.info('Running in TESTNET (sandbox) mode');
+    }
+  }
+
+  async initialize(): Promise<void> {
+    await this.exchange.loadMarkets();
+    logger.info(`Connected to Binance — ${config.trading.symbol} loaded`);
+  }
+
+  async fetchCandles(limit: number): Promise<Candle[]> {
+    const ohlcv: OHLCV[] = await this.exchange.fetchOHLCV(
+      config.trading.symbol,
+      config.trading.timeframe,
+      undefined,
+      limit
+    );
+
+    return ohlcv.map(([timestamp, open, high, low, close, volume]) => ({
+      timestamp: timestamp ?? 0,
+      open: open ?? 0,
+      high: high ?? 0,
+      low: low ?? 0,
+      close: close ?? 0,
+      volume: volume ?? 0,
+    }));
+  }
+
+  async getWalletBalance(): Promise<WalletBalance> {
+    const balance = await this.exchange.fetchBalance();
+    const usdt = balance.USDT ?? { total: 0, free: 0, used: 0 };
+
+    return {
+      totalUsdt: usdt.total ?? 0,
+      freeUsdt: usdt.free ?? 0,
+      usedUsdt: usdt.used ?? 0,
+    };
+  }
+
+  async getCurrentPrice(): Promise<number> {
+    const ticker = await this.exchange.fetchTicker(config.trading.symbol);
+    return ticker.last ?? ticker.close ?? 0;
+  }
+
+  async placeMarketOrder(side: Side, quantity: number): Promise<string> {
+    const order = await this.exchange.createOrder(
+      config.trading.symbol,
+      'market',
+      side,
+      quantity
+    );
+    const orderId = order.id ?? `order-${Date.now()}`;
+    logger.info(`Market ${side} order placed`, { orderId, quantity });
+    return orderId;
+  }
+
+  async placeLimitOrder(
+    side: Side,
+    quantity: number,
+    price: number
+  ): Promise<string> {
+    const order = await this.exchange.createOrder(
+      config.trading.symbol,
+      'limit',
+      side,
+      quantity,
+      price
+    );
+    const orderId = order.id ?? `order-${Date.now()}`;
+    logger.info(`Limit ${side} order placed`, { orderId, quantity, price });
+    return orderId;
+  }
+
+  async cancelAllOpenOrders(): Promise<void> {
+    await this.exchange.cancelAllOrders(config.trading.symbol);
+    logger.info('Cancelled all open orders');
+  }
+
+  getMarketPrecision(): { minAmount: number; minCost: number } {
+    const market = this.exchange.market(config.trading.symbol);
+
+    return {
+      minAmount: market.limits?.amount?.min ?? 0.00001,
+      minCost: market.limits?.cost?.min ?? config.trading.minOrderUsdt,
+    };
+  }
+
+  formatQuantity(quantity: number): number {
+    return parseFloat(
+      this.exchange.amountToPrecision(config.trading.symbol, quantity)
+    );
+  }
+
+  formatPrice(price: number): number {
+    return parseFloat(
+      this.exchange.priceToPrecision(config.trading.symbol, price)
+    );
+  }
+}
+
+export function positionToExitSide(position: OpenPosition): Side {
+  return position.side === 'buy' ? 'sell' : 'buy';
+}

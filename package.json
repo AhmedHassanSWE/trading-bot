@@ -1,0 +1,28 @@
+{
+  "name": "scalping-trading-bot",
+  "version": "1.0.0",
+  "description": "TypeScript scalping trading bot with strict risk management",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": ["trading", "scalping", "binance", "typescript"],
+  "license": "MIT",
+  "dependencies": {
+    "ccxt": "^4.4.77",
+    "dotenv": "^16.4.7",
+    "technicalindicators": "^3.1.0",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

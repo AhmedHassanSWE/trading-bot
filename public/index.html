@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scalping Bot Dashboard</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --card: #121820;
+      --border: #1e2a38;
+      --text: #e8eef5;
+      --muted: #8b9bb0;
+      --green: #22c55e;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --yellow: #eab308;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    h1 { font-size: 1.5rem; font-weight: 700; }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-live { background: rgba(34,197,94,0.15); color: var(--green); }
+    .badge-test { background: rgba(234,179,8,0.15); color: var(--yellow); }
+    .badge-off { background: rgba(239,68,68,0.15); color: var(--red); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .card-label { color: var(--muted); font-size: 0.8rem; margin-bottom: 6px; }
+    .card-value { font-size: 1.75rem; font-weight: 700; }
+    .card-sub { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+    .positive { color: var(--green); }
+    .negative { color: var(--red); }
+    .section { margin-bottom: 24px; }
+    .section-title {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    th { color: var(--muted); font-weight: 500; }
+    .empty { color: var(--muted); text-align: center; padding: 32px; }
+    .position-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 12px;
+    }
+    .position-item label { display: block; color: var(--muted); font-size: 0.75rem; }
+    .position-item span { font-size: 1rem; font-weight: 600; }
+    .events {
+      max-height: 280px;
+      overflow-y: auto;
+      font-size: 0.8rem;
+      font-family: 'SF Mono', Monaco, monospace;
+    }
+    .event {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 12px;
+    }
+    .event-time { color: var(--muted); min-width: 70px; }
+    .event-info { color: var(--blue); }
+    .event-warn { color: var(--yellow); }
+    .event-error { color: var(--red); }
+    .refresh-bar {
+      color: var(--muted);
+      font-size: 0.8rem;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+    .error-banner {
+      background: rgba(239,68,68,0.1);
+      border: 1px solid var(--red);
+      color: var(--red);
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Scalping Bot Dashboard</h1>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+        <span id="statusBadge" class="badge badge-off">Offline</span>
+        <span id="symbolBadge" class="badge" style="background:rgba(59,130,246,0.15);color:var(--blue)">—</span>
+      </div>
+    </div>
+    <div class="refresh-bar">
+      <div class="dot"></div>
+      <span>Auto-refresh every 5s</span>
+      <span id="lastUpdate">—</span>
+    </div>
+  </header>
+
+  <div id="errorBanner" class="error-banner">
+    Cannot connect to bot API. Make sure the bot is running with <code>npm run dev</code>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <div class="card-label">Current Balance</div>
+      <div class="card-value" id="currentBalance">—</div>
+      <div class="card-sub" id="freeBalance">Free: —</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Starting Balance</div>
+      <div class="card-value" id="startingBalance">—</div>
+      <div class="card-sub">When bot started</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Total P&amp;L</div>
+      <div class="card-value" id="totalPnl">—</div>
+      <div class="card-sub" id="totalPnlPct">—</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Today's P&amp;L</div>
+      <div class="card-value" id="dailyPnl">—</div>
+      <div class="card-sub" id="tradeCount">0 trades today</div>
+    </div>
+    <div class="card">
+      <div class="card-label">BTC Price</div>
+      <div class="card-value" id="btcPrice">—</div>
+      <div class="card-sub" id="lastSignal">No signal yet</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Win Rate Today</div>
+      <div class="card-value" id="winRate">—</div>
+      <div class="card-sub" id="winLoss">0W / 0L</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Open Position</div>
+    <div class="card" id="positionCard">
+      <div class="empty" id="noPosition">No open position — scanning for signals...</div>
+      <div id="positionDetails" style="display:none">
+        <div class="position-grid">
+          <div class="position-item"><label>Side</label><span id="posSide">—</span></div>
+          <div class="position-item"><label>Entry</label><span id="posEntry">—</span></div>
+          <div class="position-item"><label>Current</label><span id="posCurrent">—</span></div>
+          <div class="position-item"><label>Unrealized P&amp;L</label><span id="posPnl">—</span></div>
+          <div class="position-item"><label>Take Profit</label><span id="posTp">—</span></div>
+          <div class="position-item"><label>Stop Loss</label><span id="posSl">—</span></div>
+          <div class="position-item"><label>Trailing Stop</label><span id="posTrail">—</span></div>
+          <div class="position-item"><label>Held</label><span id="posHeld">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Trade History</div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Side</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>P&amp;L</th>
+            <th>%</th>
+            <th>Reason</th>
+            <th>Held</th>
+          </tr>
+        </thead>
+        <tbody id="tradesBody">
+          <tr><td colspan="8" class="empty">No trades yet</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Recent Events</div>
+    <div class="card events" id="eventsList">
+      <div class="empty">No events yet</div>
+    </div>
+  </div>
+
+  <script>
+    const API = window.location.origin;
+
+    function fmt(n, decimals = 2) {
+      if (n === null || n === undefined || isNaN(n)) return '—';
+      return Number(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    }
+
+    function fmtPct(n) {
+      if (n === null || n === undefined || isNaN(n)) return '—';
+      const sign = n >= 0 ? '+' : '';
+      return sign + n.toFixed(3) + '%';
+    }
+
+    function fmtTime(ts) {
+      return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function pnlClass(n) {
+      return n >= 0 ? 'positive' : 'negative';
+    }
+
+    function setText(id, text, cls) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      if (cls) { el.className = el.className.replace(/positive|negative/g, '').trim(); el.classList.add(cls); }
+    }
+
+    async function fetchStatus() {
+      try {
+        const res = await fetch(API + '/api/status');
+        if (!res.ok) throw new Error('API error');
+        const data = await res.json();
+        render(data);
+        document.getElementById('errorBanner').style.display = 'none';
+      } catch {
+        document.getElementById('errorBanner').style.display = 'block';
+      }
+    }
+
+    function render(d) {
+      // Header badges
+      const badge = document.getElementById('statusBadge');
+      if (d.running) {
+        badge.textContent = d.testnet ? 'Running (Testnet)' : 'Running (Live)';
+        badge.className = 'badge ' + (d.testnet ? 'badge-test' : 'badge-live');
+      } else {
+        badge.textContent = 'Offline';
+        badge.className = 'badge badge-off';
+      }
+      document.getElementById('symbolBadge').textContent = d.symbol;
+
+      // Balance cards
+      setText('currentBalance', fmt(d.wallet.totalUsdt) + ' USDT');
+      setText('freeBalance', 'Free: ' + fmt(d.wallet.freeUsdt) + ' USDT');
+      setText('startingBalance', fmt(d.startingBalance) + ' USDT');
+      setText('totalPnl', (d.totalPnl >= 0 ? '+' : '') + fmt(d.totalPnl) + ' USDT', pnlClass(d.totalPnl));
+      setText('totalPnlPct', fmtPct(d.totalPnlPct), pnlClass(d.totalPnl));
+      setText('dailyPnl', (d.stats.dailyPnl >= 0 ? '+' : '') + fmt(d.stats.dailyPnl, 4) + ' USDT', pnlClass(d.stats.dailyPnl));
+      setText('tradeCount', d.stats.tradesToday + ' trades today');
+      setText('btcPrice', '$' + fmt(d.currentPrice));
+
+      const wins = d.stats.winsToday;
+      const losses = d.stats.lossesToday;
+      const total = wins + losses;
+      setText('winRate', total > 0 ? Math.round((wins / total) * 100) + '%' : '—');
+      setText('winLoss', wins + 'W / ' + losses + 'L');
+
+      if (d.lastSignal && d.lastSignal.signal !== 'none') {
+        document.getElementById('lastSignal').textContent =
+          'Last: ' + d.lastSignal.signal.toUpperCase() + ' @ $' + fmt(d.lastSignal.price) +
+          ' (' + Math.round(d.lastSignal.strength * 100) + '%)';
+      }
+
+      // Open position
+      const noPos = document.getElementById('noPosition');
+      const posDetails = document.getElementById('positionDetails');
+      if (d.openPosition) {
+        const p = d.openPosition;
+        noPos.style.display = 'none';
+        posDetails.style.display = 'block';
+        document.getElementById('posSide').textContent = p.side === 'buy' ? 'LONG' : 'SHORT';
+        document.getElementById('posEntry').textContent = '$' + fmt(p.entryPrice);
+        document.getElementById('posCurrent').textContent = '$' + fmt(p.currentPrice);
+        const pnlEl = document.getElementById('posPnl');
+        pnlEl.textContent = (p.unrealizedPnlUsdt >= 0 ? '+' : '') + fmt(p.unrealizedPnlUsdt, 4) + ' USDT (' + fmtPct(p.unrealizedPnlPct) + ')';
+        pnlEl.className = pnlClass(p.unrealizedPnlUsdt);
+        document.getElementById('posTp').textContent = '$' + fmt(p.takeProfit);
+        document.getElementById('posSl').textContent = '$' + fmt(p.stopLoss);
+        document.getElementById('posTrail').textContent = p.trailingStop ? '$' + fmt(p.trailingStop) : 'Not active';
+        document.getElementById('posHeld').textContent = p.heldMinutes.toFixed(1) + ' min';
+      } else {
+        noPos.style.display = 'block';
+        posDetails.style.display = 'none';
+      }
+
+      // Trades
+      const tbody = document.getElementById('tradesBody');
+      if (d.recentTrades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="empty">No trades yet</td></tr>';
+      } else {
+        tbody.innerHTML = d.recentTrades.map(t => `
+          <tr>
+            <td>${fmtTime(t.closedAt)}</td>
+            <td>${t.side === 'buy' ? 'LONG' : 'SHORT'}</td>
+            <td>$${fmt(t.entryPrice)}</td>
+            <td>$${fmt(t.exitPrice)}</td>
+            <td class="${pnlClass(t.pnlUsdt)}">${t.pnlUsdt >= 0 ? '+' : ''}${fmt(t.pnlUsdt, 4)}</td>
+            <td class="${pnlClass(t.pnlPct)}">${fmtPct(t.pnlPct)}</td>
+            <td>${t.reason.replace('_', ' ')}</td>
+            <td>${t.heldMinutes.toFixed(1)}m</td>
+          </tr>
+        `).join('');
+      }
+
+      // Events
+      const eventsEl = document.getElementById('eventsList');
+      if (d.recentEvents.length === 0) {
+        eventsEl.innerHTML = '<div class="empty">No events yet</div>';
+      } else {
+        eventsEl.innerHTML = d.recentEvents.map(e => `
+          <div class="event">
+            <span class="event-time">${fmtTime(e.timestamp)}</span>
+            <span class="event-${e.level}">[${e.level.toUpperCase()}]</span>
+            <span>${e.message}</span>
+          </div>
+        `).join('');
+      }
+
+      document.getElementById('lastUpdate').textContent = 'Updated ' + fmtTime(d.updatedAt);
+    }
+
+    fetchStatus();
+    setInterval(fetchStatus, 5000);
+  </script>
+</body>
+</html>
