@@ -1,6 +1,6 @@
 import { config } from '../config';
 import { logger } from '../utils/logger';
-import { BotStats, PositionSize, Signal, WalletBalance } from '../types';
+import { BotStats, PortfolioBalance, PositionSize, Signal, WalletBalance } from '../types';
 
 export class RiskManager {
   private stats: BotStats = {
@@ -32,17 +32,17 @@ export class RiskManager {
     }
   }
 
-  canTrade(wallet: WalletBalance): { allowed: boolean; reason: string } {
+  canTrade(portfolio: PortfolioBalance): { allowed: boolean; reason: string } {
     this.resetIfNewDay();
 
-    if (wallet.freeUsdt < config.trading.minOrderUsdt) {
+    if (portfolio.freeUsdt < config.trading.minOrderUsdt) {
       return {
         allowed: false,
-        reason: `Insufficient balance: ${wallet.freeUsdt.toFixed(2)} USDT (min ${config.trading.minOrderUsdt})`,
+        reason: `Insufficient USDT: ${portfolio.freeUsdt.toFixed(2)} (min ${config.trading.minOrderUsdt})`,
       };
     }
 
-    const maxDailyLoss = wallet.totalUsdt * config.risk.maxDailyLossPercent;
+    const maxDailyLoss = config.trading.tradingCapital * config.risk.maxDailyLossPercent;
     if (this.stats.dailyPnl <= -maxDailyLoss) {
       return {
         allowed: false,
@@ -59,24 +59,30 @@ export class RiskManager {
    * is driven by stop distance so dollar risk stays at 0.2%.
    */
   calculatePositionSize(
-    wallet: WalletBalance,
+    portfolio: PortfolioBalance,
     entryPrice: number,
     signal: Signal
   ): PositionSize | null {
     if (signal === 'none' || entryPrice <= 0) return null;
 
-    const riskAmount = wallet.totalUsdt * config.risk.maxRiskPerTrade;
+    const equity = Math.min(portfolio.freeUsdt, config.trading.tradingCapital);
+    const riskAmount = equity * config.risk.maxRiskPerTrade;
     const stopDistance = entryPrice * config.risk.stopLossPercent;
 
     if (stopDistance <= 0) return null;
 
     let quantity = riskAmount / stopDistance;
+    let notionalUsdt = quantity * entryPrice;
 
-    const maxNotional = wallet.freeUsdt * 0.99;
-    const notionalUsdt = quantity * entryPrice;
+    // Hard cap: never exceed 5% of portfolio per trade (safety guard)
+    const maxNotional = Math.min(
+      portfolio.freeUsdt * 0.99,
+      equity * 0.05
+    );
 
     if (notionalUsdt > maxNotional) {
       quantity = maxNotional / entryPrice;
+      notionalUsdt = quantity * entryPrice;
     }
 
     if (quantity * entryPrice < config.trading.minOrderUsdt) {

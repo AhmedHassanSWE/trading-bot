@@ -28,17 +28,16 @@ export class TradingBot {
   }
 
   async getDashboardSnapshot(): Promise<DashboardSnapshot> {
-    const wallet = await this.exchange.getWalletBalance();
     const currentPrice = await this.exchange.getCurrentPrice();
-    const startingBalance = this.store.getStartingBalance();
-    const totalPnl = wallet.totalUsdt - startingBalance;
-    const totalPnlPct = startingBalance > 0 ? (totalPnl / startingBalance) * 100 : 0;
+    const startingBalance = config.trading.tradingCapital;
+    const realizedPnl = this.store.getRealizedPnl();
 
+    let unrealizedPnl = 0;
     let openPosition: DashboardSnapshot['openPosition'] = null;
     if (this.openPosition) {
       const pos = this.openPosition;
       const isLong = pos.side === 'buy';
-      const unrealizedPnlUsdt = isLong
+      unrealizedPnl = isLong
         ? (currentPrice - pos.entryPrice) * pos.quantity
         : (pos.entryPrice - currentPrice) * pos.quantity;
       const unrealizedPnlPct = isLong
@@ -48,19 +47,23 @@ export class TradingBot {
       openPosition = {
         ...pos,
         currentPrice,
-        unrealizedPnlUsdt,
+        unrealizedPnlUsdt: unrealizedPnl,
         unrealizedPnlPct,
         heldMinutes: (Date.now() - pos.openedAt) / 60000,
       };
     }
 
+    const totalPnl = realizedPnl + unrealizedPnl;
+    const currentBalance = startingBalance + totalPnl;
+    const totalPnlPct = startingBalance > 0 ? (totalPnl / startingBalance) * 100 : 0;
+
     return {
+      startingBalance,
+      currentBalance,
       running: this.running,
       testnet: config.exchange.useTestnet,
       symbol: config.trading.symbol,
       currentPrice,
-      wallet,
-      startingBalance,
       totalPnl,
       totalPnlPct,
       openPosition,
@@ -68,13 +71,6 @@ export class TradingBot {
       recentTrades: this.store.getTrades(),
       recentEvents: this.store.getEvents(),
       lastSignal: this.lastSignal,
-      config: {
-        riskPerTrade: config.risk.maxRiskPerTrade,
-        takeProfitMin: config.risk.takeProfitMin,
-        takeProfitMax: config.risk.takeProfitMax,
-        stopLoss: config.risk.stopLossPercent,
-        maxHoldHours: config.position.maxHoldHours,
-      },
       updatedAt: Date.now(),
     };
   }
@@ -83,16 +79,19 @@ export class TradingBot {
     await this.exchange.initialize();
     this.running = true;
 
-    const wallet = await this.exchange.getWalletBalance();
-    this.store.setStartingBalance(wallet.totalUsdt);
+    // Convert any leftover BTC from previous sessions back to USDT
+    const usdtBalance = await this.exchange.convertHoldingsToUsdt();
+
     this.store.addEvent('info', 'Bot started', {
-      wallet: wallet.totalUsdt,
+      tradingCapital: config.trading.tradingCapital,
+      usdtBalance,
       symbol: config.trading.symbol,
     });
 
     logger.info('Bot started', {
       symbol: config.trading.symbol,
-      wallet: `${wallet.totalUsdt.toFixed(2)} USDT`,
+      tradingCapital: `${config.trading.tradingCapital.toFixed(2)} USDT`,
+      usdtBalance: `${usdtBalance.toFixed(2)} USDT`,
       riskPerTrade: `${(config.risk.maxRiskPerTrade * 100).toFixed(2)}%`,
       takeProfit: `${(config.risk.takeProfitMin * 100).toFixed(1)}–${(config.risk.takeProfitMax * 100).toFixed(1)}%`,
       stopLoss: `${(config.risk.stopLossPercent * 100).toFixed(2)}%`,
@@ -126,8 +125,8 @@ export class TradingBot {
       return;
     }
 
-    const wallet = await this.exchange.getWalletBalance();
-    const tradeCheck = this.riskManager.canTrade(wallet);
+    const portfolio = await this.exchange.getUsdtTradingBalance();
+    const tradeCheck = this.riskManager.canTrade(portfolio);
 
     if (!tradeCheck.allowed) {
       logger.warn(`Trading paused: ${tradeCheck.reason}`);
@@ -147,7 +146,7 @@ export class TradingBot {
     }
 
     const positionSize = this.riskManager.calculatePositionSize(
-      wallet,
+      portfolio,
       signal.price,
       signal.signal
     );

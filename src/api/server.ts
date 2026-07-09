@@ -47,48 +47,47 @@ export function startApiServer(bot: TradingBot, port = config.api.port): http.Se
       }
 
       if (url === '/api/status') {
-        const snapshot = await bot.getDashboardSnapshot();
-        sendJson(res, 200, snapshot);
+        sendJson(res, 200, await bot.getDashboardSnapshot());
         return;
       }
 
       if (url === '/api/wallet') {
-        const snapshot = await bot.getDashboardSnapshot();
+        const s = await bot.getDashboardSnapshot();
         sendJson(res, 200, {
-          wallet: snapshot.wallet,
-          startingBalance: snapshot.startingBalance,
-          totalPnl: snapshot.totalPnl,
-          totalPnlPct: snapshot.totalPnlPct,
-          updatedAt: snapshot.updatedAt,
+          startingBalance: s.startingBalance,
+          currentBalance: s.currentBalance,
+          totalPnl: s.totalPnl,
+          totalPnlPct: s.totalPnlPct,
+          updatedAt: s.updatedAt,
         });
         return;
       }
 
       if (url === '/api/position') {
-        const snapshot = await bot.getDashboardSnapshot();
+        const s = await bot.getDashboardSnapshot();
         sendJson(res, 200, {
-          openPosition: snapshot.openPosition,
-          currentPrice: snapshot.currentPrice,
-          updatedAt: snapshot.updatedAt,
+          openPosition: s.openPosition,
+          currentPrice: s.currentPrice,
+          updatedAt: s.updatedAt,
         });
         return;
       }
 
       if (url === '/api/trades') {
-        const snapshot = await bot.getDashboardSnapshot();
+        const s = await bot.getDashboardSnapshot();
         sendJson(res, 200, {
-          trades: snapshot.recentTrades,
-          stats: snapshot.stats,
-          updatedAt: snapshot.updatedAt,
+          trades: s.recentTrades,
+          stats: s.stats,
+          updatedAt: s.updatedAt,
         });
         return;
       }
 
       if (url === '/api/events') {
-        const snapshot = await bot.getDashboardSnapshot();
+        const s = await bot.getDashboardSnapshot();
         sendJson(res, 200, {
-          events: snapshot.recentEvents,
-          updatedAt: snapshot.updatedAt,
+          events: s.recentEvents,
+          updatedAt: s.updatedAt,
         });
         return;
       }
@@ -101,7 +100,7 @@ export function startApiServer(bot: TradingBot, port = config.api.port): http.Se
   });
 
   server.listen(port, () => {
-    logger.info(`Dashboard API running at http://localhost:${port}`);
+    logger.info(`Dashboard running at http://localhost:${port}`);
   });
 
   return server;

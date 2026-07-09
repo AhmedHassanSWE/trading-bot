@@ -43,21 +43,23 @@
     .badge-live { background: rgba(34,197,94,0.15); color: var(--green); }
     .badge-test { background: rgba(234,179,8,0.15); color: var(--yellow); }
     .badge-off { background: rgba(239,68,68,0.15); color: var(--red); }
-    .grid {
+    .top-bar {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: 1fr 1fr;
       gap: 16px;
       margin-bottom: 24px;
+    }
+    @media (max-width: 520px) {
+      .top-bar { grid-template-columns: 1fr; }
     }
     .card {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 20px;
+      padding: 24px;
     }
     .card-label { color: var(--muted); font-size: 0.8rem; margin-bottom: 6px; }
-    .card-value { font-size: 1.75rem; font-weight: 700; }
-    .card-sub { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+    .card-value { font-size: 2rem; font-weight: 700; }
     .positive { color: var(--green); }
     .negative { color: var(--red); }
     .section { margin-bottom: 24px; }
@@ -130,6 +132,15 @@
       margin-bottom: 16px;
       display: none;
     }
+    .meta-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+      font-size: 0.875rem;
+      color: var(--muted);
+    }
+    .meta-row span strong { color: var(--text); }
   </style>
 </head>
 <body>
@@ -152,37 +163,23 @@
     Cannot connect to bot API. Make sure the bot is running with <code>npm run dev</code>
   </div>
 
-  <div class="grid">
+  <!-- Top bar: only starting + current balance -->
+  <div class="top-bar">
     <div class="card">
-      <div class="card-label">Current Balance</div>
-      <div class="card-value" id="currentBalance">—</div>
-      <div class="card-sub" id="freeBalance">Free: —</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Starting Balance</div>
+      <div class="card-label">Starting Balance (USDT)</div>
       <div class="card-value" id="startingBalance">—</div>
-      <div class="card-sub">When bot started</div>
     </div>
     <div class="card">
-      <div class="card-label">Total P&amp;L</div>
-      <div class="card-value" id="totalPnl">—</div>
-      <div class="card-sub" id="totalPnlPct">—</div>
+      <div class="card-label">Current Balance (USDT)</div>
+      <div class="card-value" id="currentBalance">—</div>
     </div>
-    <div class="card">
-      <div class="card-label">Today's P&amp;L</div>
-      <div class="card-value" id="dailyPnl">—</div>
-      <div class="card-sub" id="tradeCount">0 trades today</div>
-    </div>
-    <div class="card">
-      <div class="card-label">BTC Price</div>
-      <div class="card-value" id="btcPrice">—</div>
-      <div class="card-sub" id="lastSignal">No signal yet</div>
-    </div>
-    <div class="card">
-      <div class="card-label">Win Rate Today</div>
-      <div class="card-value" id="winRate">—</div>
-      <div class="card-sub" id="winLoss">0W / 0L</div>
-    </div>
+  </div>
+
+  <div class="meta-row">
+    <span>BTC Price: <strong id="btcPrice">—</strong></span>
+    <span>Today's P&amp;L: <strong id="dailyPnl">—</strong></span>
+    <span>Win Rate: <strong id="winRate">—</strong></span>
+    <span>Last Signal: <strong id="lastSignal">—</strong></span>
   </div>
 
   <div class="section">
@@ -235,8 +232,6 @@
   </div>
 
   <script>
-    const API = window.location.origin;
-
     function fmt(n, decimals = 2) {
       if (n === null || n === undefined || isNaN(n)) return '—';
       return Number(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -259,15 +254,16 @@
     function setText(id, text, cls) {
       const el = document.getElementById(id);
       el.textContent = text;
-      if (cls) { el.className = el.className.replace(/positive|negative/g, '').trim(); el.classList.add(cls); }
+      if (cls) {
+        el.className = 'card-value ' + cls;
+      }
     }
 
     async function fetchStatus() {
       try {
-        const res = await fetch(API + '/api/status');
+        const res = await fetch('/api/status');
         if (!res.ok) throw new Error('API error');
-        const data = await res.json();
-        render(data);
+        render(await res.json());
         document.getElementById('errorBanner').style.display = 'none';
       } catch {
         document.getElementById('errorBanner').style.display = 'block';
@@ -275,7 +271,6 @@
     }
 
     function render(d) {
-      // Header badges
       const badge = document.getElementById('statusBadge');
       if (d.running) {
         badge.textContent = d.testnet ? 'Running (Testnet)' : 'Running (Live)';
@@ -286,26 +281,26 @@
       }
       document.getElementById('symbolBadge').textContent = d.symbol;
 
-      // Balance cards
-      setText('currentBalance', fmt(d.wallet.totalUsdt) + ' USDT');
-      setText('freeBalance', 'Free: ' + fmt(d.wallet.freeUsdt) + ' USDT');
+      // Top bar only
       setText('startingBalance', fmt(d.startingBalance) + ' USDT');
-      setText('totalPnl', (d.totalPnl >= 0 ? '+' : '') + fmt(d.totalPnl) + ' USDT', pnlClass(d.totalPnl));
-      setText('totalPnlPct', fmtPct(d.totalPnlPct), pnlClass(d.totalPnl));
-      setText('dailyPnl', (d.stats.dailyPnl >= 0 ? '+' : '') + fmt(d.stats.dailyPnl, 4) + ' USDT', pnlClass(d.stats.dailyPnl));
-      setText('tradeCount', d.stats.tradesToday + ' trades today');
-      setText('btcPrice', '$' + fmt(d.currentPrice));
+      setText('currentBalance', fmt(d.currentBalance) + ' USDT', pnlClass(d.currentBalance - d.startingBalance));
+
+      // Meta row
+      document.getElementById('btcPrice').textContent = '$' + fmt(d.currentPrice);
+      const dailyEl = document.getElementById('dailyPnl');
+      dailyEl.textContent = (d.stats.dailyPnl >= 0 ? '+' : '') + fmt(d.stats.dailyPnl, 4) + ' USDT';
+      dailyEl.className = pnlClass(d.stats.dailyPnl);
 
       const wins = d.stats.winsToday;
       const losses = d.stats.lossesToday;
       const total = wins + losses;
-      setText('winRate', total > 0 ? Math.round((wins / total) * 100) + '%' : '—');
-      setText('winLoss', wins + 'W / ' + losses + 'L');
+      document.getElementById('winRate').textContent = total > 0 ? Math.round((wins / total) * 100) + '% (' + wins + 'W/' + losses + 'L)' : '—';
 
       if (d.lastSignal && d.lastSignal.signal !== 'none') {
         document.getElementById('lastSignal').textContent =
-          'Last: ' + d.lastSignal.signal.toUpperCase() + ' @ $' + fmt(d.lastSignal.price) +
-          ' (' + Math.round(d.lastSignal.strength * 100) + '%)';
+          d.lastSignal.signal.toUpperCase() + ' @ $' + fmt(d.lastSignal.price) + ' (' + Math.round(d.lastSignal.strength * 100) + '%)';
+      } else {
+        document.getElementById('lastSignal').textContent = 'None';
       }
 
       // Open position
@@ -332,7 +327,7 @@
 
       // Trades
       const tbody = document.getElementById('tradesBody');
-      if (d.recentTrades.length === 0) {
+      if (!d.recentTrades.length) {
         tbody.innerHTML = '<tr><td colspan="8" class="empty">No trades yet</td></tr>';
       } else {
         tbody.innerHTML = d.recentTrades.map(t => `
@@ -351,7 +346,7 @@
 
       // Events
       const eventsEl = document.getElementById('eventsList');
-      if (d.recentEvents.length === 0) {
+      if (!d.recentEvents.length) {
         eventsEl.innerHTML = '<div class="empty">No events yet</div>';
       } else {
         eventsEl.innerHTML = d.recentEvents.map(e => `

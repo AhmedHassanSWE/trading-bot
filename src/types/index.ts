@@ -47,6 +47,17 @@ export interface WalletBalance {
   usedUsdt: number;
 }
 
+export interface PortfolioBalance extends WalletBalance {
+  /** Base asset symbol, e.g. BTC */
+  baseAsset: string;
+  /** Total base asset held (e.g. BTC amount) */
+  baseHoldings: number;
+  /** Base asset value converted to USDT */
+  baseValueUsdt: number;
+  /** Total portfolio = USDT + base asset value */
+  portfolioValueUsdt: number;
+}
+
 export interface BotStats {
   tradesToday: number;
   winsToday: number;
@@ -78,12 +89,12 @@ export interface BotEvent {
 }
 
 export interface DashboardSnapshot {
+  startingBalance: number;
+  currentBalance: number;
   running: boolean;
   testnet: boolean;
   symbol: string;
   currentPrice: number;
-  wallet: WalletBalance;
-  startingBalance: number;
   totalPnl: number;
   totalPnlPct: number;
   openPosition: (OpenPosition & {
@@ -96,12 +107,5 @@ export interface DashboardSnapshot {
   recentTrades: ClosedTrade[];
   recentEvents: BotEvent[];
   lastSignal: TradeSignal | null;
-  config: {
-    riskPerTrade: number;
-    takeProfitMin: number;
-    takeProfitMax: number;
-    stopLoss: number;
-    maxHoldHours: number;
-  };
   updatedAt: number;
 }

@@ -1,7 +1,7 @@
 import ccxt, { Exchange, OHLCV } from 'ccxt';
 import { config } from '../config';
 import { logger } from '../utils/logger';
-import { Candle, OpenPosition, Side, WalletBalance } from '../types';
+import { Candle, OpenPosition, Side, PortfolioBalance, WalletBalance } from '../types';
 
 export class ExchangeClient {
   private exchange: Exchange;
@@ -57,6 +57,40 @@ export class ExchangeClient {
     };
   }
 
+  /** USDT-only view for trading when no position is open */
+  async getUsdtTradingBalance(): Promise<PortfolioBalance> {
+    const wallet = await this.getWalletBalance();
+    const baseAsset = config.trading.symbol.split('/')[0];
+    return {
+      ...wallet,
+      baseAsset,
+      baseHoldings: 0,
+      baseValueUsdt: 0,
+      portfolioValueUsdt: wallet.totalUsdt,
+    };
+  }
+
+  /** Total portfolio value = USDT cash + base asset (e.g. BTC) valued in USDT */
+  async getPortfolioBalance(): Promise<PortfolioBalance> {
+    const balance = await this.exchange.fetchBalance();
+    const usdt = balance.USDT ?? { total: 0, free: 0, used: 0 };
+    const baseAsset = config.trading.symbol.split('/')[0];
+    const base = balance[baseAsset] ?? { total: 0, free: 0, used: 0 };
+    const baseHoldings = base.total ?? 0;
+    const currentPrice = await this.getCurrentPrice();
+    const baseValueUsdt = baseHoldings * currentPrice;
+
+    return {
+      totalUsdt: usdt.total ?? 0,
+      freeUsdt: usdt.free ?? 0,
+      usedUsdt: usdt.used ?? 0,
+      baseAsset,
+      baseHoldings,
+      baseValueUsdt,
+      portfolioValueUsdt: (usdt.total ?? 0) + baseValueUsdt,
+    };
+  }
+
   async getCurrentPrice(): Promise<number> {
     const ticker = await this.exchange.fetchTicker(config.trading.symbol);
     return ticker.last ?? ticker.close ?? 0;
@@ -94,6 +128,25 @@ export class ExchangeClient {
   async cancelAllOpenOrders(): Promise<void> {
     await this.exchange.cancelAllOrders(config.trading.symbol);
     logger.info('Cancelled all open orders');
+  }
+
+  /** Sell all base asset (BTC) holdings and return USDT balance */
+  async convertHoldingsToUsdt(): Promise<number> {
+    const portfolio = await this.getPortfolioBalance();
+    const { minAmount } = this.getMarketPrecision();
+    const quantity = this.formatQuantity(portfolio.baseHoldings);
+
+    if (quantity < minAmount) {
+      return portfolio.freeUsdt;
+    }
+
+    await this.placeMarketOrder('sell', quantity);
+    const wallet = await this.getWalletBalance();
+    logger.info('Converted BTC holdings back to USDT', {
+      sold: quantity,
+      usdtBalance: wallet.freeUsdt,
+    });
+    return wallet.freeUsdt;
   }
 
   getMarketPrecision(): { minAmount: number; minCost: number } {

@@ -32,6 +32,7 @@ export const config = {
     scanIntervalMs: Math.floor(parseFloatEnv('SCAN_INTERVAL_MS', 15000)),
     minOrderUsdt: parseFloatEnv('MIN_ORDER_USDT', 10),
     maxOpenPositions: Math.floor(parseFloatEnv('MAX_OPEN_POSITIONS', 1)),
+    tradingCapital: parseFloatEnv('TRADING_CAPITAL', 1000),
   },
   risk: {
     maxRiskPerTrade: parseFloatEnv('MAX_RISK_PER_TRADE', 0.002),

@@ -6,15 +6,6 @@ const MAX_EVENTS = 100;
 export class BotStore {
   private trades: ClosedTrade[] = [];
   private events: BotEvent[] = [];
-  private startingBalance = 0;
-
-  setStartingBalance(balance: number): void {
-    this.startingBalance = balance;
-  }
-
-  getStartingBalance(): number {
-    return this.startingBalance;
-  }
 
   addTrade(trade: ClosedTrade): void {
     this.trades.unshift(trade);
@@ -25,6 +16,10 @@ export class BotStore {
 
   getTrades(): ClosedTrade[] {
     return [...this.trades];
+  }
+
+  getRealizedPnl(): number {
+    return this.trades.reduce((sum, t) => sum + t.pnlUsdt, 0);
   }
 
   addEvent(level: BotEvent['level'], message: string, data?: Record<string, unknown>): void {
