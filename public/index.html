@@ -161,10 +161,7 @@
 
   <div id="errorBanner" class="error-banner">
     <strong>Cannot connect to bot API.</strong><br />
-    Vercel only hosts this dashboard — the bot must run on Railway/Render/your PC.<br />
-    1) Deploy the bot to <a href="https://railway.app" style="color:#ef4444">Railway</a><br />
-    2) Edit <code>public/config.js</code> → set <code>window.BOT_API_URL</code> to your Railway URL<br />
-    3) Push and redeploy Vercel
+    Make sure this project is redeployed with the latest code (includes <code>/api/status</code> on Vercel).
   </div>
 
   <!-- Top bar: only starting + current balance -->
@@ -279,8 +276,8 @@
         banner.style.display = 'block';
         if (IS_VERCEL && !BOT_API_URL) {
           banner.innerHTML =
-            '<strong>Vercel dashboard only — bot not connected.</strong><br>' +
-            'Deploy the bot to Railway, then set <code>window.BOT_API_URL</code> in <code>public/config.js</code> and redeploy.';
+            '<strong>Bot API not responding.</strong><br>' +
+            'Push the latest code and redeploy. Then add Redis: Vercel → Marketplace → Upstash Redis → Connect to project.';
         }
       }
     }
@@ -374,6 +371,14 @@
       }
 
       document.getElementById('lastUpdate').textContent = 'Updated ' + fmtTime(d.updatedAt);
+
+      if (d.kvConfigured === false) {
+        const banner = document.getElementById('errorBanner');
+        banner.style.display = 'block';
+        banner.innerHTML =
+          '<strong>Bot is running but needs Redis storage.</strong><br>' +
+          'Vercel → Marketplace → Redis (Upstash) → Add integration → Connect to this project, then redeploy.';
+      }
     }
 
     fetchStatus();

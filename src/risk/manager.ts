@@ -136,6 +136,17 @@ export class RiskManager {
     return { ...this.stats };
   }
 
+  importStats(stats: BotStats, dayStart: string): void {
+    this.stats = { ...stats };
+    this.dayStart = dayStart;
+    this.resetIfNewDay();
+  }
+
+  exportStats(): { stats: BotStats; dayStart: string } {
+    this.resetIfNewDay();
+    return { stats: { ...this.stats }, dayStart: this.dayStart };
+  }
+
   getRewardRiskRatio(): number {
     const avgTp =
       (config.risk.takeProfitMin + config.risk.takeProfitMax) / 2;

@@ -3,6 +3,7 @@ import { ExchangeClient, positionToExitSide } from '../exchange/client';
 import { RiskManager } from '../risk/manager';
 import { ScalpingStrategy, logSignal } from '../strategy/scalping';
 import { BotStore } from '../store/botStore';
+import { BotPersistentState } from '../store/persistentState';
 import { logger } from '../utils/logger';
 import { DashboardSnapshot, OpenPosition, Side, Signal, TradeSignal } from '../types';
 
@@ -75,8 +76,57 @@ export class TradingBot {
     };
   }
 
-  async start(): Promise<void> {
+  loadState(state: BotPersistentState): void {
+    this.openPosition = state.openPosition;
+    this.lastSignal = state.lastSignal;
+    this.running = state.running;
+    this.exchangeInitialized = state.exchangeInitialized;
+    this.store.importData(state.trades, state.events);
+    this.riskManager.importStats(state.stats, state.dayStart);
+  }
+
+  exportState(): BotPersistentState {
+    const { stats, dayStart } = this.riskManager.exportStats();
+    const { trades, events } = this.store.exportData();
+    return {
+      openPosition: this.openPosition,
+      lastSignal: this.lastSignal,
+      trades,
+      events,
+      stats,
+      dayStart,
+      running: this.running,
+      exchangeInitialized: this.exchangeInitialized,
+    };
+  }
+
+  private exchangeInitialized = false;
+
+  async ensureInitialized(alreadyInitialized: boolean): Promise<void> {
+    if (this.exchangeInitialized || alreadyInitialized) {
+      this.exchangeInitialized = true;
+      return;
+    }
     await this.exchange.initialize();
+    this.exchangeInitialized = true;
+  }
+
+  /** One scan cycle for Vercel cron (no setInterval). */
+  async runTick(): Promise<void> {
+    this.running = true;
+    await this.scan();
+  }
+
+  markRunning(): void {
+    this.running = true;
+  }
+
+  async bootstrapOnVercel(kvConfigured: boolean): Promise<void> {
+    this.store.addEvent('info', 'Bot started on Vercel', { kvConfigured });
+  }
+
+  async start(): Promise<void> {
+    await this.ensureInitialized(false);
     this.running = true;
 
     // Convert any leftover BTC from previous sessions back to USDT

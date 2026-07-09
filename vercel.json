@@ -1,7 +1,18 @@
 {
   "version": 2,
-  "framework": null,
-  "installCommand": "",
-  "buildCommand": "",
-  "outputDirectory": "public"
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "outputDirectory": "public",
+  "functions": {
+    "api/**/*.ts": {
+      "maxDuration": 60,
+      "memory": 1024
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "* * * * *"
+    }
+  ]
 }

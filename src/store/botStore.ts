@@ -32,4 +32,13 @@ export class BotStore {
   getEvents(): BotEvent[] {
     return [...this.events];
   }
+
+  importData(trades: ClosedTrade[], events: BotEvent[]): void {
+    this.trades = [...trades];
+    this.events = [...events];
+  }
+
+  exportData(): { trades: ClosedTrade[]; events: BotEvent[] } {
+    return { trades: [...this.trades], events: [...this.events] };
+  }
 }
