@@ -13,7 +13,6 @@
   "license": "MIT",
   "dependencies": {
     "ccxt": "^4.4.77",
-    "dotenv": "^16.4.7",
     "technicalindicators": "^3.1.0",
     "winston": "^3.17.0"
   },

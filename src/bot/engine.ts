@@ -175,8 +175,8 @@ export class TradingBot {
       return;
     }
 
-    const { minAmount } = this.exchange.getMarketPrecision();
-    if (quantity < minAmount) {
+    if (!this.exchange.isOrderSizeValid(quantity, entryPrice)) {
+      const { minAmount } = this.exchange.getMarketPrecision();
       logger.warn('Quantity below market minimum', { quantity, minAmount });
       return;
     }

@@ -132,30 +132,62 @@ export class ExchangeClient {
 
   /** Sell all base asset (BTC) holdings and return USDT balance */
   async convertHoldingsToUsdt(): Promise<number> {
-    const portfolio = await this.getPortfolioBalance();
-    const { minAmount } = this.getMarketPrecision();
-    const quantity = this.formatQuantity(portfolio.baseHoldings);
+    try {
+      const wallet = await this.getWalletBalance();
+      const balance = await this.exchange.fetchBalance();
+      const baseAsset = config.trading.symbol.split('/')[0];
+      const baseHoldings = balance[baseAsset]?.free ?? balance[baseAsset]?.total ?? 0;
 
-    if (quantity < minAmount) {
-      return portfolio.freeUsdt;
+      if (baseHoldings <= 0) {
+        return wallet.freeUsdt;
+      }
+
+      const quantity = this.formatQuantity(baseHoldings);
+      const price = await this.getCurrentPrice();
+      const notional = quantity * price;
+      const { minAmount, minCost } = this.getMarketPrecision();
+
+      // Binance rejects amounts <= 0.00001 BTC — use strict greater-than check
+      const effectiveMin = Math.max(minAmount, 0.00001);
+      if (quantity <= effectiveMin || notional < minCost) {
+        logger.info('Skipping BTC→USDT conversion (dust or below minimum)', {
+          holdings: baseHoldings,
+          quantity,
+          effectiveMin,
+          notional,
+        });
+        return wallet.freeUsdt;
+      }
+
+      await this.placeMarketOrder('sell', quantity);
+      const updated = await this.getWalletBalance();
+      logger.info('Converted BTC holdings back to USDT', {
+        sold: quantity,
+        usdtBalance: updated.freeUsdt,
+      });
+      return updated.freeUsdt;
+    } catch (err) {
+      const wallet = await this.getWalletBalance().catch(() => ({ freeUsdt: 0, totalUsdt: 0, usedUsdt: 0 }));
+      logger.warn('BTC→USDT conversion skipped — bot continuing with USDT', {
+        error: String(err),
+      });
+      return wallet.freeUsdt;
     }
-
-    await this.placeMarketOrder('sell', quantity);
-    const wallet = await this.getWalletBalance();
-    logger.info('Converted BTC holdings back to USDT', {
-      sold: quantity,
-      usdtBalance: wallet.freeUsdt,
-    });
-    return wallet.freeUsdt;
   }
 
   getMarketPrecision(): { minAmount: number; minCost: number } {
     const market = this.exchange.market(config.trading.symbol);
+    const minAmount = Math.max(market.limits?.amount?.min ?? 0, 0.00001);
 
     return {
-      minAmount: market.limits?.amount?.min ?? 0.00001,
+      minAmount,
       minCost: market.limits?.cost?.min ?? config.trading.minOrderUsdt,
     };
+  }
+
+  isOrderSizeValid(quantity: number, price: number): boolean {
+    const { minAmount, minCost } = this.getMarketPrecision();
+    return quantity > minAmount && quantity * price >= minCost;
   }
 
   formatQuantity(quantity: number): number {

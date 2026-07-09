@@ -160,7 +160,7 @@
   </header>
 
   <div id="errorBanner" class="error-banner">
-    Cannot connect to bot API. Make sure the bot is running with <code>npm run dev</code>
+    Cannot connect to bot. Run <code>npm run dev</code> locally, or set <code>BOT_API_URL</code> in index.html to your bot server.
   </div>
 
   <!-- Top bar: only starting + current balance -->
@@ -232,6 +232,11 @@
   </div>
 
   <script>
+    // When dashboard is on Vercel, set this to your bot server URL (e.g. Railway).
+    // Leave empty when running locally with npm run dev.
+    const BOT_API_URL = '';
+    const API = (BOT_API_URL || window.location.origin).replace(/\/$/, '');
+
     function fmt(n, decimals = 2) {
       if (n === null || n === undefined || isNaN(n)) return '—';
       return Number(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -261,7 +266,7 @@
 
     async function fetchStatus() {
       try {
-        const res = await fetch('/api/status');
+        const res = await fetch(API + '/api/status');
         if (!res.ok) throw new Error('API error');
         render(await res.json());
         document.getElementById('errorBanner').style.display = 'none';

@@ -99,6 +99,14 @@ export function startApiServer(bot: TradingBot, port = config.api.port): http.Se
     }
   });
 
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.error(`Port ${port} is already in use. Stop the other bot (lsof -ti :${port} | xargs kill) or change config.api.port`);
+      process.exit(1);
+    }
+    throw err;
+  });
+
   server.listen(port, () => {
     logger.info(`Dashboard running at http://localhost:${port}`);
   });
