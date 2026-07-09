@@ -161,10 +161,10 @@
 
   <div id="errorBanner" class="error-banner">
     <strong>Cannot connect to bot API.</strong><br />
-    Vercel only hosts this dashboard page — the bot must run on Railway/Render/your PC.<br />
+    Vercel only hosts this dashboard — the bot must run on Railway/Render/your PC.<br />
     1) Deploy the bot to <a href="https://railway.app" style="color:#ef4444">Railway</a><br />
-    2) In Vercel → Settings → Environment Variables → add <code>BOT_API_URL</code> = your Railway URL<br />
-    3) Redeploy Vercel
+    2) Edit <code>public/config.js</code> → set <code>window.BOT_API_URL</code> to your Railway URL<br />
+    3) Push and redeploy Vercel
   </div>
 
   <!-- Top bar: only starting + current balance -->
@@ -235,9 +235,9 @@
     </div>
   </div>
 
+  <script src="config.js"></script>
   <script>
-    // Injected at Vercel build time from BOT_API_URL env var. Empty = localhost.
-    const BOT_API_URL = '';
+    const BOT_API_URL = window.BOT_API_URL || '';
     const API = (BOT_API_URL || window.location.origin).replace(/\/$/, '');
     const IS_VERCEL = window.location.hostname.includes('vercel.app');
 
@@ -280,7 +280,7 @@
         if (IS_VERCEL && !BOT_API_URL) {
           banner.innerHTML =
             '<strong>Vercel dashboard only — bot not connected.</strong><br>' +
-            'Deploy the bot to Railway, then set <code>BOT_API_URL</code> in Vercel env vars to your Railway URL and redeploy.';
+            'Deploy the bot to Railway, then set <code>window.BOT_API_URL</code> in <code>public/config.js</code> and redeploy.';
         }
       }
     }

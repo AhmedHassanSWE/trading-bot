@@ -13,19 +13,23 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown): void
   res.end(JSON.stringify(data));
 }
 
-function sendHtml(res: http.ServerResponse, filePath: string): void {
+function sendFile(res: http.ServerResponse, filePath: string, contentType: string): void {
   fs.readFile(filePath, (err, content) => {
     if (err) {
-      sendJson(res, 404, { error: 'Dashboard not found' });
+      sendJson(res, 404, { error: 'Not found' });
       return;
     }
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.writeHead(200, { 'Content-Type': contentType });
     res.end(content);
   });
 }
 
+function sendHtml(res: http.ServerResponse, filePath: string): void {
+  sendFile(res, filePath, 'text/html; charset=utf-8');
+}
+
 export function startApiServer(bot: TradingBot, port = config.api.port): http.Server {
-  const dashboardPath = path.join(process.cwd(), 'public', 'index.html');
+  const publicDir = path.join(process.cwd(), 'public');
 
   const server = http.createServer(async (req, res) => {
     const url = req.url?.split('?')[0] ?? '/';
@@ -42,7 +46,12 @@ export function startApiServer(bot: TradingBot, port = config.api.port): http.Se
 
     try {
       if (url === '/' || url === '/index.html') {
-        sendHtml(res, dashboardPath);
+        sendHtml(res, path.join(publicDir, 'index.html'));
+        return;
+      }
+
+      if (url === '/config.js') {
+        sendFile(res, path.join(publicDir, 'config.js'), 'application/javascript; charset=utf-8');
         return;
       }
 

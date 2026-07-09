@@ -1,5 +1,7 @@
 {
   "version": 2,
-  "buildCommand": "node scripts/build-dashboard.js",
+  "framework": null,
+  "installCommand": "",
+  "buildCommand": "",
   "outputDirectory": "public"
 }

@@ -1,20 +1,21 @@
 /**
- * Injects BOT_API_URL into the dashboard for Vercel deploys.
- * Set BOT_API_URL in Vercel project settings → Environment Variables.
- * Example: https://your-bot.up.railway.app
+ * Optional: inject BOT_API_URL into public/config.js before deploy.
+ * Usage: BOT_API_URL=https://your-bot.up.railway.app node scripts/build-dashboard.js
+ *
+ * Do NOT set this as Vercel buildCommand — it makes Vercel treat the repo as a
+ * Node app and crash. Edit public/config.js directly, or run this script locally
+ * before pushing.
  */
 const fs = require('fs');
 const path = require('path');
 
 const apiUrl = process.env.BOT_API_URL || '';
-const htmlPath = path.join(__dirname, '../public/index.html');
-let html = fs.readFileSync(htmlPath, 'utf8');
-
+const configPath = path.join(__dirname, '../public/config.js');
 const safeUrl = apiUrl.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-html = html.replace(
-  /const BOT_API_URL = '[^']*';/,
-  `const BOT_API_URL = '${safeUrl}';`
-);
 
-fs.writeFileSync(htmlPath, html);
-console.log(`Dashboard API URL set to: ${apiUrl || '(same origin — local dev)'}`);
+const content = `// Auto-generated — set BOT_API_URL env var when running build-dashboard.js
+window.BOT_API_URL = '${safeUrl}';
+`;
+
+fs.writeFileSync(configPath, content);
+console.log(`Wrote ${configPath} → ${apiUrl || '(empty, uses same origin)'}`);
