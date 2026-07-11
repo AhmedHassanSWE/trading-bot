@@ -36,15 +36,11 @@ export class RiskManager {
     this.resetIfNewDay();
 
     const equity = Math.min(portfolio.freeUsdt, config.trading.tradingCapital);
-    const minNeeded = Math.max(
-      config.trading.minOrderUsdt,
-      config.trading.targetProfitUsdt / config.risk.takeProfitPercent
-    );
 
-    if (equity < minNeeded) {
+    if (equity < config.trading.minOrderUsdt) {
       return {
         allowed: false,
-        reason: `Insufficient USDT: ${equity.toFixed(2)} (need ~${minNeeded.toFixed(0)} for $${config.trading.targetProfitUsdt} target)`,
+        reason: `Insufficient USDT: ${equity.toFixed(2)} (minimum ${config.trading.minOrderUsdt} USDT required)`,
       };
     }
 
@@ -60,8 +56,8 @@ export class RiskManager {
   }
 
   /**
-   * Size positions so a take-profit hit earns at least targetProfitUsdt ($10).
-   * Capped by maxPositionPercent of trading capital and max risk per trade.
+   * Size the position based on the risk budget (maxRiskPerTrade × equity).
+   * Loss at stop ≤ maxRiskPerTrade × equity. Capped by maxPositionPercent.
    */
   calculatePositionSize(
     portfolio: PortfolioBalance,
@@ -81,32 +77,16 @@ export class RiskManager {
       equity * config.trading.maxPositionPercent
     );
 
-    // Notional needed so TP pays at least targetProfitUsdt
-    const profitTargetNotional = config.trading.targetProfitUsdt / takeProfitPercent;
-
-    // Notional allowed by risk budget (loss at stop = maxRiskPerTrade * equity)
+    // Size based on risk budget: lose at most maxRiskPerTrade * equity at stop
     const riskAmount = equity * config.risk.maxRiskPerTrade;
     const riskBasedNotional = (riskAmount / stopDistance) * entryPrice;
 
-    let notionalUsdt = Math.min(
-      Math.max(profitTargetNotional, riskBasedNotional),
-      maxNotional
-    );
+    let notionalUsdt = Math.min(riskBasedNotional, maxNotional);
 
     if (notionalUsdt < config.trading.minOrderUsdt) {
       logger.warn('Position too small for exchange minimum', {
-        notional: notionalUsdt,
+        notional: notionalUsdt.toFixed(2),
         min: config.trading.minOrderUsdt,
-      });
-      return null;
-    }
-
-    const expectedProfit = notionalUsdt * takeProfitPercent;
-    if (expectedProfit < config.trading.targetProfitUsdt * 0.95) {
-      logger.warn('Cannot reach profit target with available capital', {
-        expectedProfit: expectedProfit.toFixed(2),
-        target: config.trading.targetProfitUsdt,
-        maxNotional: maxNotional.toFixed(2),
       });
       return null;
     }
@@ -124,7 +104,8 @@ export class RiskManager {
 
     const actualRisk = notionalUsdt * config.risk.stopLossPercent;
 
-    logger.info('Position sized for profit target', {
+    const expectedProfit = notionalUsdt * takeProfitPercent;
+    logger.info('Position sized', {
       notional: `${notionalUsdt.toFixed(2)} USDT`,
       expectedProfit: `${expectedProfit.toFixed(2)} USDT`,
       riskAtStop: `${actualRisk.toFixed(2)} USDT`,

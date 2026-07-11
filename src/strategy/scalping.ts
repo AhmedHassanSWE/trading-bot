@@ -1,273 +1,495 @@
-import { EMA, RSI, ATR, MACD, BollingerBands } from 'technicalindicators';
+/**
+ * Strategy: Trend Continuation After Pullback
+ *
+ * Philosophy: Do not trade. Wait. Only enter when almost everything aligns.
+ * A missed trade is acceptable. A low-quality trade is not.
+ *
+ * Timeframes:
+ *   1h  — trend direction
+ *   15m — trend health
+ *   5m  — entry timing
+ *
+ * Score required: ≥95 / 100
+ */
+
+import { EMA, RSI, ATR, MACD, ADX } from 'technicalindicators';
 import { Candle, TradeSignal } from '../types';
 import { logger } from '../utils/logger';
 
-/**
- * Enhanced multi-signal strategy.
- *
- * Entry types (in priority order):
- *  1. RSI Bounce      — RSI recovers from extreme oversold/overbought (strongest reversal)
- *  2. MACD Cross      — MACD histogram flips sign, confirming momentum shift
- *  3. BB Bounce       — Price taps Bollinger lower/upper band and reverses
- *  4. EMA Cross       — EMA 9/21 crossover with optional volume confirmation
- *  5. EMA Momentum    — Price riding the trend (EMA aligned + RSI in range)
- *
- * Volume is a bonus to signal strength, not a hard gate.
- * This generates significantly more trades while still filtering noise.
- */
+// ─── Public types ─────────────────────────────────────────────────────────────
 
-interface StrategyConfig {
-  emaFast: number;
-  emaSlow: number;
-  rsiPeriod: number;
-  rsiOversold: number;
-  rsiOverbought: number;
-  atrPeriod: number;
-  macdFast: number;
-  macdSlow: number;
-  macdSignal: number;
-  bbPeriod: number;
-  bbStdDev: number;
-  minVolumeMultiplier: number;
+export interface MultiTimeframeCandles {
+  candles1h: Candle[];
+  candles15m: Candle[];
+  candles5m: Candle[];
 }
 
-const DEFAULT_CONFIG: StrategyConfig = {
-  emaFast: 9,
-  emaSlow: 21,
-  rsiPeriod: 14,
-  rsiOversold: 33,
-  rsiOverbought: 67,
-  atrPeriod: 14,
-  macdFast: 12,
-  macdSlow: 26,
-  macdSignal: 9,
-  bbPeriod: 20,
-  bbStdDev: 2,
-  minVolumeMultiplier: 1.1,
-};
+export interface TradeOpportunity {
+  symbol: string;
+  shouldTrade: boolean;
+  score: number;
+  scoreBreakdown: ScoreBreakdown;
+  entryPrice: number;
+  takeProfit: number;
+  stopLoss: number;
+  riskReward: string;
+  trend: string;
+  bitcoinStatus: string;
+  reasons: string[];
+  rejections: string[];
+  summary: string;
+}
 
-interface Indicators {
-  fastNow: number;
-  fastPrev: number;
-  slowNow: number;
-  slowPrev: number;
-  rsiNow: number;
-  rsiPrev: number;
-  atrNow: number;
+export interface ScoreBreakdown {
+  bitcoinHealth: number;     // max 20
+  trendQuality: number;      // max 20
+  emaAlignment: number;      // max 15
+  pullbackQuality: number;   // max 15
+  volumeConfirmation: number;// max 15
+  resistanceDistance: number;// max 10
+  momentumAdx: number;       // max 5
+  total: number;             // max 100
+}
+
+export interface BitcoinAnalysis {
+  bias: 'bullish' | 'bearish' | 'sideways';
+  trendStrength: 'strong' | 'moderate' | 'weak';
+  volatility: 'high' | 'normal' | 'low';
+  healthy: boolean;
+  reason: string;
+}
+
+// ─── Internal indicator snapshots ─────────────────────────────────────────────
+
+interface TfSnapshot {
+  price: number;
+  ema20: number;
+  ema50: number;
+  ema200: number;
+  rsi: number;
+  adx: number;
+  atrPct: number;
   macdHist: number;
   macdHistPrev: number;
-  bbUpper: number;
-  bbLower: number;
-  bbMiddle: number;
-  currentPrice: number;
-  prevPrice: number;
+  higherHighs: boolean;
+  higherLows: boolean;
   volumeRatio: number;
+  lastCandle: Candle;
+  prevCandle: Candle;
+  recentHighs: number[];
+  recentLows: number[];
 }
+
+// ─── Strategy class ───────────────────────────────────────────────────────────
 
 export class ScalpingStrategy {
-  private cfg: StrategyConfig;
+  private readonly TP_PCT = 0.005;   // +0.5%
+  private readonly SL_PCT = 0.006;   // −0.6%
+  private readonly MIN_SCORE = 95;   // must reach 95/100
 
-  constructor(config: Partial<StrategyConfig> = {}) {
-    this.cfg = { ...DEFAULT_CONFIG, ...config };
+  // ── Bitcoin health gate ─────────────────────────────────────────────────────
+
+  analyzeBitcoin(candles1h: Candle[], candles15m: Candle[]): BitcoinAnalysis {
+    const snap1h = this.buildSnapshot(candles1h);
+    const snap15m = this.buildSnapshot(candles15m);
+
+    if (!snap1h || !snap15m) {
+      return { bias: 'sideways', trendStrength: 'weak', volatility: 'normal', healthy: false, reason: 'Insufficient BTC candle data' };
+    }
+
+    // Volatility check — if ATR > 1.5% on 1h, market is too chaotic
+    if (snap1h.atrPct > 0.015) {
+      return { bias: 'sideways', trendStrength: 'weak', volatility: 'high', healthy: false, reason: `BTC extremely volatile (ATR ${(snap1h.atrPct * 100).toFixed(2)}% on 1h)` };
+    }
+
+    // Trend direction from 1h EMA stack
+    const bullish1h = snap1h.price > snap1h.ema20 && snap1h.ema20 > snap1h.ema50;
+    const bearish1h = snap1h.price < snap1h.ema20 && snap1h.ema20 < snap1h.ema50;
+    const sideways1h = !bullish1h && !bearish1h;
+
+    // 15m must agree
+    const bullish15m = snap15m.price > snap15m.ema20 && snap15m.ema20 > snap15m.ema50;
+
+    if (bearish1h) {
+      return { bias: 'bearish', trendStrength: 'strong', volatility: 'normal', healthy: false, reason: 'BTC 1h trend is bearish (EMA20 < EMA50)' };
+    }
+
+    if (sideways1h || snap1h.adx < 20) {
+      return { bias: 'sideways', trendStrength: 'weak', volatility: 'normal', healthy: false, reason: `BTC trending sideways (ADX ${snap1h.adx.toFixed(1)})` };
+    }
+
+    if (!bullish15m) {
+      return { bias: 'bullish', trendStrength: 'moderate', volatility: 'normal', healthy: false, reason: 'BTC 1h bullish but 15m not confirming — possible pullback in progress' };
+    }
+
+    // RSI must not be overbought (no chasing)
+    if (snap1h.rsi > 72) {
+      return { bias: 'bullish', trendStrength: 'moderate', volatility: 'normal', healthy: false, reason: `BTC 1h RSI overbought (${snap1h.rsi.toFixed(1)})` };
+    }
+
+    const trendStrength: BitcoinAnalysis['trendStrength'] =
+      snap1h.adx >= 30 ? 'strong' : snap1h.adx >= 22 ? 'moderate' : 'weak';
+
+    return {
+      bias: 'bullish',
+      trendStrength,
+      volatility: snap1h.atrPct > 0.008 ? 'high' : 'normal',
+      healthy: true,
+      reason: `BTC bullish on 1h and 15m. ADX ${snap1h.adx.toFixed(1)}, RSI ${snap1h.rsi.toFixed(1)}`,
+    };
   }
+
+  // ── Full coin analysis ──────────────────────────────────────────────────────
+
+  analyzeCoin(
+    symbol: string,
+    tf: MultiTimeframeCandles,
+    btc: BitcoinAnalysis
+  ): TradeOpportunity {
+    const noTrade = (reason: string, extra: string[] = []): TradeOpportunity => ({
+      symbol,
+      shouldTrade: false,
+      score: 0,
+      scoreBreakdown: { bitcoinHealth: 0, trendQuality: 0, emaAlignment: 0, pullbackQuality: 0, volumeConfirmation: 0, resistanceDistance: 0, momentumAdx: 0, total: 0 },
+      entryPrice: tf.candles5m[tf.candles5m.length - 1]?.close ?? 0,
+      takeProfit: 0,
+      stopLoss: 0,
+      riskReward: '0.5:0.6',
+      trend: 'Unknown',
+      bitcoinStatus: btc.reason,
+      reasons: [],
+      rejections: [reason, ...extra],
+      summary: `NO TRADE — ${reason}`,
+    });
+
+    const snap1h  = this.buildSnapshot(tf.candles1h);
+    const snap15m = this.buildSnapshot(tf.candles15m);
+    const snap5m  = this.buildSnapshot(tf.candles5m);
+
+    if (!snap1h || !snap15m || !snap5m) return noTrade('Insufficient candle data for one or more timeframes');
+
+    const price = snap5m.price;
+    const reasons: string[] = [];
+    const rejections: string[] = [];
+
+    // ─── Component 1: Bitcoin Health (max 20) ─────────────────────────────────
+    let bitcoinHealth = 0;
+    if (!btc.healthy) {
+      return noTrade(`Bitcoin not healthy: ${btc.reason}`);
+    }
+    bitcoinHealth = btc.trendStrength === 'strong' ? 20 : btc.trendStrength === 'moderate' ? 15 : 10;
+    reasons.push(`BTC ${btc.trendStrength} uptrend confirmed`);
+
+    // ─── Component 2: Trend Quality (max 20) ──────────────────────────────────
+    let trendQuality = 0;
+
+    const bullish1h = snap1h.price > snap1h.ema20 && snap1h.ema20 > snap1h.ema50 && snap1h.ema50 > snap1h.ema200;
+    const bullish15m = snap15m.price > snap15m.ema20 && snap15m.ema20 > snap15m.ema50;
+    const hh1h = snap1h.higherHighs;
+    const hl1h = snap1h.higherLows;
+
+    if (!bullish1h) {
+      rejections.push(`1h trend weak — price not above EMA20/50/200`);
+      return noTrade('1h EMA stack not bullish', rejections);
+    }
+    if (!hh1h || !hl1h) {
+      rejections.push(`1h market structure broken — no HH/HL`);
+      return noTrade('Market structure not showing higher highs and higher lows on 1h', rejections);
+    }
+    if (!bullish15m) {
+      rejections.push(`15m trend not confirming 1h`);
+      return noTrade('15m trend not aligned with 1h', rejections);
+    }
+
+    trendQuality = (bullish1h ? 10 : 0) + (hh1h && hl1h ? 7 : 0) + (bullish15m ? 3 : 0);
+    reasons.push(`Strong uptrend on 1h and 15m with HH/HL structure`);
+
+    // ─── Component 3: EMA Alignment (max 15) ──────────────────────────────────
+    let emaAlignment = 0;
+
+    const ema5mFull = snap5m.ema20 > 0 && snap5m.ema50 > 0 && snap5m.ema200 > 0;
+    const ema5mStack = snap5m.price > snap5m.ema20 && snap5m.ema20 > snap5m.ema50 && snap5m.ema50 > snap5m.ema200;
+
+    if (!ema5mFull) {
+      return noTrade('EMA200 not available on 5m — insufficient candle data');
+    }
+    if (!ema5mStack) {
+      rejections.push(`5m EMA stack not bullish (price ${price.toFixed(4)} vs EMA20 ${snap5m.ema20.toFixed(4)})`);
+      return noTrade('5m EMA alignment not bullish', rejections);
+    }
+
+    emaAlignment = 15;
+    reasons.push(`Full EMA20/50/200 bullish stack on 5m`);
+
+    // ─── Component 4: Pullback Quality (max 15) ───────────────────────────────
+    // A good pullback: price pulled toward EMA20 on 5m but held above it,
+    // with the last candle showing buyers returning.
+
+    let pullbackQuality = 0;
+    const pullbackToEma20 = snap5m.price <= snap5m.ema20 * 1.003 && snap5m.price >= snap5m.ema20 * 0.997;
+    const pullbackToEma50 = snap5m.price <= snap5m.ema50 * 1.004 && snap5m.price >= snap5m.ema50 * 0.996;
+    const aboveEma20 = snap5m.price > snap5m.ema20;
+    const aboveEma50 = snap5m.price > snap5m.ema50;
+
+    // Last candle must be green (buyers returned)
+    const lastCandleBullish = snap5m.lastCandle.close > snap5m.lastCandle.open;
+    // Previous candle should have been a red (down) candle = pullback
+    const prevCandleWasBearish = snap5m.prevCandle.close < snap5m.prevCandle.open;
+    // Pullback volume should be less than bullish move volume
+    const pullbackLowVolume = snap5m.lastCandle.volume < snap5m.prevCandle.volume * 1.1;
+
+    if (!aboveEma20 || !aboveEma50) {
+      return noTrade('Price broke below EMA20 or EMA50 on 5m — pullback too deep', rejections);
+    }
+
+    if (lastCandleBullish && prevCandleWasBearish && (pullbackToEma20 || pullbackToEma50)) {
+      pullbackQuality = 15;
+      reasons.push(`Classic pullback to EMA${pullbackToEma20 ? '20' : '50'} with bullish reversal candle`);
+    } else if (lastCandleBullish && prevCandleWasBearish) {
+      pullbackQuality = 9;
+      reasons.push(`Bearish-to-bullish candle flip — possible pullback entry`);
+    } else if (lastCandleBullish) {
+      pullbackQuality = 5;
+      reasons.push(`Bullish continuation candle`);
+    } else {
+      // No bullish candle = no entry confirmation
+      return noTrade('No bullish entry confirmation on 5m — waiting for buyers to return', rejections);
+    }
+
+    // ─── Component 5: Volume Confirmation (max 15) ────────────────────────────
+    let volumeConfirmation = 0;
+    // Entry candle volume should be rising vs pullback candle
+    const entryVolumeRising = snap5m.lastCandle.volume > snap5m.prevCandle.volume;
+    const volumeAboveAvg = snap5m.volumeRatio >= 1.0;
+
+    if (entryVolumeRising && snap5m.volumeRatio >= 1.3) {
+      volumeConfirmation = 15;
+      reasons.push(`Volume surge on entry candle (${snap5m.volumeRatio.toFixed(2)}x avg)`);
+    } else if (entryVolumeRising && volumeAboveAvg) {
+      volumeConfirmation = 10;
+      reasons.push(`Volume rising on entry candle`);
+    } else if (volumeAboveAvg) {
+      volumeConfirmation = 5;
+    } else {
+      rejections.push(`Low volume on entry (${snap5m.volumeRatio.toFixed(2)}x avg) — weak buyer interest`);
+      return noTrade('Volume not confirming entry — buyers not participating', rejections);
+    }
+
+    // ─── Component 6: Resistance Distance (max 10) ────────────────────────────
+    let resistanceDistance = 0;
+    // Resistance = highest high in last 24 × 5m candles (2 hours)
+    const nearestResistance = Math.max(...snap5m.recentHighs.slice(-24));
+    const distanceToResistance = (nearestResistance - price) / price;
+    const distanceToTp = this.TP_PCT; // 0.5%
+
+    if (distanceToResistance < distanceToTp * 0.8) {
+      return noTrade(
+        `Not enough room to TP — resistance at ${nearestResistance.toFixed(4)} only ${(distanceToResistance * 100).toFixed(2)}% away (need ${(distanceToTp * 100).toFixed(1)}%)`,
+        rejections
+      );
+    }
+
+    if (distanceToResistance >= distanceToTp * 2) {
+      resistanceDistance = 10;
+      reasons.push(`Clear path to TP — resistance ${(distanceToResistance * 100).toFixed(2)}% away`);
+    } else if (distanceToResistance >= distanceToTp) {
+      resistanceDistance = 7;
+      reasons.push(`Adequate room to TP`);
+    } else {
+      resistanceDistance = 4;
+    }
+
+    // ─── Component 7: Momentum / ADX (max 5) ──────────────────────────────────
+    let momentumAdx = 0;
+    const adx5m = snap5m.adx;
+    const macdMomentum = snap5m.macdHist > 0 && snap5m.macdHist > snap5m.macdHistPrev;
+
+    if (adx5m < 25) {
+      rejections.push(`ADX too low on 5m (${adx5m.toFixed(1)}) — trend not strong enough`);
+      return noTrade(`5m ADX ${adx5m.toFixed(1)} below minimum 25 — no strong trend to continue`, rejections);
+    }
+
+    if (macdMomentum && adx5m >= 30) {
+      momentumAdx = 5;
+      reasons.push(`MACD rising, ADX ${adx5m.toFixed(1)} — strong momentum`);
+    } else if (macdMomentum || adx5m >= 28) {
+      momentumAdx = 3;
+      reasons.push(`Adequate momentum (ADX ${adx5m.toFixed(1)})`);
+    } else {
+      momentumAdx = 2;
+    }
+
+    // ─── Final score ───────────────────────────────────────────────────────────
+    const scoreBreakdown: ScoreBreakdown = {
+      bitcoinHealth,
+      trendQuality,
+      emaAlignment,
+      pullbackQuality,
+      volumeConfirmation,
+      resistanceDistance,
+      momentumAdx,
+      total: bitcoinHealth + trendQuality + emaAlignment + pullbackQuality + volumeConfirmation + resistanceDistance + momentumAdx,
+    };
+
+    const score = scoreBreakdown.total;
+    const entryPrice = price;
+    const takeProfit = entryPrice * (1 + this.TP_PCT);
+    const stopLoss   = entryPrice * (1 - this.SL_PCT);
+    const shouldTrade = score >= this.MIN_SCORE;
+
+    if (!shouldTrade) {
+      return {
+        symbol,
+        shouldTrade: false,
+        score,
+        scoreBreakdown,
+        entryPrice,
+        takeProfit,
+        stopLoss,
+        riskReward: `${this.TP_PCT * 100}% / ${this.SL_PCT * 100}%`,
+        trend: 'Bullish',
+        bitcoinStatus: btc.reason,
+        reasons,
+        rejections: [...rejections, `Score ${score}/100 below minimum ${this.MIN_SCORE}`],
+        summary: `NO TRADE — Score ${score}/100 (need ${this.MIN_SCORE}). Good setup but not enough confirmations.`,
+      };
+    }
+
+    const confidence = score >= 98 ? 'Very High' : score >= 95 ? 'High' : 'Medium';
+
+    return {
+      symbol,
+      shouldTrade: true,
+      score,
+      scoreBreakdown,
+      entryPrice,
+      takeProfit,
+      stopLoss,
+      riskReward: `+${this.TP_PCT * 100}% / -${this.SL_PCT * 100}%`,
+      trend: 'Bullish continuation after pullback',
+      bitcoinStatus: btc.reason,
+      reasons,
+      rejections,
+      summary: `✅ TRADE — ${symbol} LONG | Score ${score}/100 [${confidence}] | Entry ${entryPrice.toFixed(4)} | TP ${takeProfit.toFixed(4)} | SL ${stopLoss.toFixed(4)}`,
+    };
+  }
+
+  // ── Rank and pick best coin ─────────────────────────────────────────────────
+
+  findBestOpportunity(
+    coins: { symbol: string; tf: MultiTimeframeCandles }[],
+    btcCandles1h: Candle[],
+    btcCandles15m: Candle[]
+  ): { btc: BitcoinAnalysis; best: TradeOpportunity | null; all: TradeOpportunity[] } {
+    const btc = this.analyzeBitcoin(btcCandles1h, btcCandles15m);
+
+    if (!btc.healthy) {
+      logger.info(`NO TRADE — Bitcoin: ${btc.reason}`);
+      return { btc, best: null, all: [] };
+    }
+
+    const results: TradeOpportunity[] = [];
+
+    for (const coin of coins) {
+      try {
+        const opp = this.analyzeCoin(coin.symbol, coin.tf, btc);
+        results.push(opp);
+      } catch (err) {
+        logger.warn(`Analysis failed for ${coin.symbol}`, { error: String(err) });
+      }
+    }
+
+    results.sort((a, b) => b.score - a.score);
+
+    const best = results.find((r) => r.shouldTrade) ?? null;
+
+    if (best) {
+      logger.info(best.summary, {
+        scoreBreakdown: best.scoreBreakdown,
+        reasons: best.reasons,
+      });
+    } else {
+      const top = results[0];
+      if (top) {
+        logger.info(`NO TRADE — Best candidate: ${top.symbol} scored ${top.score}/100`, {
+          rejection: top.rejections[0] ?? 'Score too low',
+        });
+      } else {
+        logger.info('NO TRADE — No coins passed initial filters');
+      }
+    }
+
+    return { btc, best, all: results };
+  }
+
+  // ── Legacy adapter so engine compiles without changes ───────────────────────
 
   analyze(candles: Candle[]): TradeSignal {
-    const minCandles = Math.max(this.cfg.macdSlow + this.cfg.macdSignal + 2, 30);
-    if (candles.length < minCandles) {
-      return { signal: 'none', price: 0, reason: 'Insufficient candle data', strength: 0 };
-    }
-
-    const ind = this.buildIndicators(candles);
-    if (!ind) {
-      return { signal: 'none', price: candles[candles.length - 1].close, reason: 'Indicators not ready', strength: 0 };
-    }
-
-    // ── 1. RSI Bounce (highest confidence reversal) ───────────────────────
-    const rsiBullishBounce = ind.rsiPrev < this.cfg.rsiOversold && ind.rsiNow >= this.cfg.rsiOversold;
-    const rsiBearishBounce = ind.rsiPrev > this.cfg.rsiOverbought && ind.rsiNow <= this.cfg.rsiOverbought;
-
-    if (rsiBullishBounce) {
-      return this.signal('long', ind, 0.90,
-        `RSI bounce from oversold (${ind.rsiPrev.toFixed(1)} → ${ind.rsiNow.toFixed(1)})`);
-    }
-    if (rsiBearishBounce) {
-      return this.signal('short', ind, 0.90,
-        `RSI bounce from overbought (${ind.rsiPrev.toFixed(1)} → ${ind.rsiNow.toFixed(1)})`);
-    }
-
-    // ── 2. MACD Histogram Cross ──────────────────────────────────────────
-    const macdBullishCross = ind.macdHistPrev < 0 && ind.macdHist >= 0;
-    const macdBearishCross = ind.macdHistPrev > 0 && ind.macdHist <= 0;
-
-    if (macdBullishCross && ind.rsiNow < this.cfg.rsiOverbought) {
-      const strength = 0.80 + (ind.volumeRatio >= this.cfg.minVolumeMultiplier ? 0.08 : 0);
-      return this.signal('long', ind, strength, `MACD histogram cross UP, RSI=${ind.rsiNow.toFixed(1)}`);
-    }
-    if (macdBearishCross && ind.rsiNow > this.cfg.rsiOversold) {
-      const strength = 0.80 + (ind.volumeRatio >= this.cfg.minVolumeMultiplier ? 0.08 : 0);
-      return this.signal('short', ind, strength, `MACD histogram cross DOWN, RSI=${ind.rsiNow.toFixed(1)}`);
-    }
-
-    // ── 3. Bollinger Band Bounce (mean reversion) ────────────────────────
-    const bbBullishBounce =
-      ind.prevPrice <= ind.bbLower && ind.currentPrice > ind.bbLower && ind.rsiNow < 50;
-    const bbBearishBounce =
-      ind.prevPrice >= ind.bbUpper && ind.currentPrice < ind.bbUpper && ind.rsiNow > 50;
-
-    if (bbBullishBounce) {
-      const strength = 0.78 + (ind.rsiNow < 40 ? 0.07 : 0) + (ind.volumeRatio >= this.cfg.minVolumeMultiplier ? 0.05 : 0);
-      return this.signal('long', ind, strength,
-        `BB lower band bounce, RSI=${ind.rsiNow.toFixed(1)}, BB_lower=${ind.bbLower.toFixed(2)}`);
-    }
-    if (bbBearishBounce) {
-      const strength = 0.78 + (ind.rsiNow > 60 ? 0.07 : 0) + (ind.volumeRatio >= this.cfg.minVolumeMultiplier ? 0.05 : 0);
-      return this.signal('short', ind, strength,
-        `BB upper band bounce, RSI=${ind.rsiNow.toFixed(1)}, BB_upper=${ind.bbUpper.toFixed(2)}`);
-    }
-
-    // ── 4. Bollinger Band Breakout (momentum continuation) ───────────────
-    const bbBullishBreakout =
-      ind.prevPrice < ind.bbUpper && ind.currentPrice >= ind.bbUpper &&
-      ind.rsiNow > 50 && ind.rsiNow < this.cfg.rsiOverbought;
-    const bbBearishBreakout =
-      ind.prevPrice > ind.bbLower && ind.currentPrice <= ind.bbLower &&
-      ind.rsiNow < 50 && ind.rsiNow > this.cfg.rsiOversold;
-
-    if (bbBullishBreakout && ind.volumeRatio >= this.cfg.minVolumeMultiplier) {
-      return this.signal('long', ind, 0.82,
-        `BB upper breakout, RSI=${ind.rsiNow.toFixed(1)}, vol=${ind.volumeRatio.toFixed(2)}x`);
-    }
-    if (bbBearishBreakout && ind.volumeRatio >= this.cfg.minVolumeMultiplier) {
-      return this.signal('short', ind, 0.82,
-        `BB lower breakout, RSI=${ind.rsiNow.toFixed(1)}, vol=${ind.volumeRatio.toFixed(2)}x`);
-    }
-
-    // ── 5. EMA Cross ──────────────────────────────────────────────────────
-    const emaBullishCross = ind.fastPrev <= ind.slowPrev && ind.fastNow > ind.slowNow;
-    const emaBearishCross = ind.fastPrev >= ind.slowPrev && ind.fastNow < ind.slowNow;
-
-    if (emaBullishCross && ind.rsiNow < this.cfg.rsiOverbought) {
-      const strength = 0.72 + (ind.volumeRatio >= this.cfg.minVolumeMultiplier ? 0.10 : 0) + (ind.rsiNow > 40 && ind.rsiNow < 60 ? 0.05 : 0);
-      return this.signal('long', ind, strength,
-        `EMA 9/21 bullish cross, RSI=${ind.rsiNow.toFixed(1)}, vol=${ind.volumeRatio.toFixed(2)}x`);
-    }
-    if (emaBearishCross && ind.rsiNow > this.cfg.rsiOversold) {
-      const strength = 0.72 + (ind.volumeRatio >= this.cfg.minVolumeMultiplier ? 0.10 : 0) + (ind.rsiNow > 40 && ind.rsiNow < 60 ? 0.05 : 0);
-      return this.signal('short', ind, strength,
-        `EMA 9/21 bearish cross, RSI=${ind.rsiNow.toFixed(1)}, vol=${ind.volumeRatio.toFixed(2)}x`);
-    }
-
-    // ── 6. EMA Momentum Continuation ─────────────────────────────────────
-    const trendUp = ind.fastNow > ind.slowNow;
-    const trendDown = ind.fastNow < ind.slowNow;
-    const rsiMomentumLong = ind.rsiNow > 45 && ind.rsiNow < this.cfg.rsiOverbought;
-    const rsiMomentumShort = ind.rsiNow < 55 && ind.rsiNow > this.cfg.rsiOversold;
-
-    if (trendUp && rsiMomentumLong && ind.volumeRatio >= this.cfg.minVolumeMultiplier) {
-      const strength = 0.60 + (ind.rsiNow > 50 && ind.rsiNow < 65 ? 0.08 : 0);
-      return this.signal('long', ind, strength,
-        `EMA momentum UP, RSI=${ind.rsiNow.toFixed(1)}, vol=${ind.volumeRatio.toFixed(2)}x`);
-    }
-    if (trendDown && rsiMomentumShort && ind.volumeRatio >= this.cfg.minVolumeMultiplier) {
-      const strength = 0.60 + (ind.rsiNow < 50 && ind.rsiNow > 35 ? 0.08 : 0);
-      return this.signal('short', ind, strength,
-        `EMA momentum DOWN, RSI=${ind.rsiNow.toFixed(1)}, vol=${ind.volumeRatio.toFixed(2)}x`);
-    }
-
-    return {
-      signal: 'none',
-      price: ind.currentPrice,
-      reason: `No setup — RSI=${ind.rsiNow.toFixed(1)}, EMA_fast=${ind.fastNow.toFixed(2)} EMA_slow=${ind.slowNow.toFixed(2)}, MACD_hist=${ind.macdHist.toFixed(2)}, vol=${ind.volumeRatio.toFixed(2)}x`,
-      strength: 0,
-    };
+    return { signal: 'none', price: candles[candles.length - 1]?.close ?? 0, reason: 'Use findBestOpportunity()', strength: 0 };
   }
 
-  private signal(
-    direction: 'long' | 'short',
-    ind: Indicators,
-    strength: number,
-    reason: string
-  ): TradeSignal {
-    return {
-      signal: direction,
-      price: ind.currentPrice,
-      reason,
-      strength: Math.min(strength, 1),
-    };
-  }
+  // ─── Private helpers ────────────────────────────────────────────────────────
 
-  private buildIndicators(candles: Candle[]): Indicators | null {
-    const closes = candles.map((c) => c.close);
+  private buildSnapshot(candles: Candle[]): TfSnapshot | null {
+    if (candles.length < 210) return null;
+
+    const closes  = candles.map((c) => c.close);
+    const highs   = candles.map((c) => c.high);
+    const lows    = candles.map((c) => c.low);
     const volumes = candles.map((c) => c.volume);
 
-    const emaFast = EMA.calculate({ period: this.cfg.emaFast, values: closes });
-    const emaSlow = EMA.calculate({ period: this.cfg.emaSlow, values: closes });
-    const rsi = RSI.calculate({ period: this.cfg.rsiPeriod, values: closes });
-    const atr = ATR.calculate({
-      period: this.cfg.atrPeriod,
-      high: candles.map((c) => c.high),
-      low: candles.map((c) => c.low),
-      close: closes,
-    });
-    const macdResult = MACD.calculate({
-      values: closes,
-      fastPeriod: this.cfg.macdFast,
-      slowPeriod: this.cfg.macdSlow,
-      signalPeriod: this.cfg.macdSignal,
-      SimpleMAOscillator: false,
-      SimpleMASignal: false,
-    });
-    const bb = BollingerBands.calculate({
-      values: closes,
-      period: this.cfg.bbPeriod,
-      stdDev: this.cfg.bbStdDev,
-    });
+    const ema20r = EMA.calculate({ period: 20,  values: closes });
+    const ema50r = EMA.calculate({ period: 50,  values: closes });
+    const ema200r = EMA.calculate({ period: 200, values: closes });
+    const rsir   = RSI.calculate({ period: 14,   values: closes });
+    const atrr   = ATR.calculate({ period: 14, high: highs, low: lows, close: closes });
+    const adxr   = ADX.calculate({ period: 14, high: highs, low: lows, close: closes });
+    const macdr  = MACD.calculate({ values: closes, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false });
 
-    if (
-      emaFast.length < 2 || emaSlow.length < 2 || rsi.length < 2 ||
-      atr.length < 1 || macdResult.length < 2 || bb.length < 1
-    ) {
-      return null;
-    }
+    if (!ema20r.length || !ema50r.length || !ema200r.length || !rsir.length || !atrr.length || !adxr.length || macdr.length < 2) return null;
 
-    const avgVolume = volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
-    const currentVolume = volumes[volumes.length - 1];
-    const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
+    const price  = closes[closes.length - 1];
+    const avgVol = volumes.slice(-21, -1).reduce((a, b) => a + b, 0) / 20;
 
-    const lastMacd = macdResult[macdResult.length - 1];
-    const prevMacd = macdResult[macdResult.length - 2];
-    const lastBb = bb[bb.length - 1];
+    // HH/HL over last 20 candles
+    const lookback = 20;
+    const rHigh = highs.slice(-lookback);
+    const rLow  = lows.slice(-lookback);
+    const mid   = Math.floor(lookback / 2);
+    const higherHighs = Math.max(...rHigh.slice(mid)) > Math.max(...rHigh.slice(0, mid));
+    const higherLows  = Math.min(...rLow.slice(mid))  > Math.min(...rLow.slice(0, mid));
+
+    const rawAdx = adxr[adxr.length - 1];
+    const adxVal = typeof rawAdx === 'number' ? rawAdx : (rawAdx as { adx: number }).adx;
 
     return {
-      fastNow: emaFast[emaFast.length - 1],
-      fastPrev: emaFast[emaFast.length - 2],
-      slowNow: emaSlow[emaSlow.length - 1],
-      slowPrev: emaSlow[emaSlow.length - 2],
-      rsiNow: rsi[rsi.length - 1],
-      rsiPrev: rsi[rsi.length - 2],
-      atrNow: atr[atr.length - 1],
-      macdHist: lastMacd.histogram ?? 0,
-      macdHistPrev: prevMacd.histogram ?? 0,
-      bbUpper: lastBb.upper,
-      bbLower: lastBb.lower,
-      bbMiddle: lastBb.middle,
-      currentPrice: closes[closes.length - 1],
-      prevPrice: closes[closes.length - 2],
-      volumeRatio,
+      price,
+      ema20:  ema20r[ema20r.length - 1],
+      ema50:  ema50r[ema50r.length - 1],
+      ema200: ema200r[ema200r.length - 1],
+      rsi:    rsir[rsir.length - 1],
+      adx:    adxVal,
+      atrPct: atrr[atrr.length - 1] / price,
+      macdHist:     macdr[macdr.length - 1].histogram ?? 0,
+      macdHistPrev: macdr[macdr.length - 2].histogram ?? 0,
+      higherHighs,
+      higherLows,
+      volumeRatio: avgVol > 0 ? volumes[volumes.length - 1] / avgVol : 1,
+      lastCandle: candles[candles.length - 1],
+      prevCandle: candles[candles.length - 2],
+      recentHighs: highs,
+      recentLows: lows,
     };
   }
 }
+
+// ─── Logging helper ───────────────────────────────────────────────────────────
 
 export function logSignal(signal: TradeSignal, symbol?: string): void {
   const pair = symbol ?? signal.symbol ?? '';
-  const prefix = pair ? `${pair} ` : '';
-
   if (signal.signal === 'none') {
-    logger.debug(`${prefix}${signal.reason}`);
+    logger.debug(`${pair} ${signal.reason}`);
   } else {
-    logger.info(`${prefix}Signal: ${signal.signal.toUpperCase()} (strength: ${(signal.strength * 100).toFixed(0)}%)`, {
-      price: signal.price,
-      reason: signal.reason,
-    });
+    logger.info(`${pair} LONG signal`, { price: signal.price, reason: signal.reason });
   }
 }

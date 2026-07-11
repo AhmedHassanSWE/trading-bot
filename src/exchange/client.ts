@@ -28,10 +28,10 @@ export class ExchangeClient {
     logger.info(`Connected to Binance — watchlist: ${config.trading.watchlist.join(', ')}`);
   }
 
-  async fetchCandles(symbol: string, limit: number): Promise<Candle[]> {
+  async fetchCandles(symbol: string, limit: number, timeframe = '5m'): Promise<Candle[]> {
     const ohlcv: OHLCV[] = await this.exchange.fetchOHLCV(
       symbol,
-      config.trading.timeframe,
+      timeframe,
       undefined,
       limit
     );

@@ -24,28 +24,35 @@ export const config = {
       'LINK/USDT',
       'DOT/USDT',
     ],
-    timeframe: '1m',
-    candleLimit: 100,
-    scanIntervalMs: 10000,
+    /** Candle limits per timeframe (need ≥210 for EMA200) */
+    candleLimit1h:  250,
+    candleLimit15m: 250,
+    candleLimit5m:  250,
+    /** How often to scan in milliseconds (every 5 minutes matches the 5m candle close) */
+    scanIntervalMs: 300000,
     minOrderUsdt: 10,
     maxOpenPositions: 1,
     tradingCapital: 1000,
-    /** Minimum USDT profit when take-profit hits */
-    targetProfitUsdt: 10,
-    /** Max % of trading capital per trade (1 position at a time) */
+    /** Max % of trading capital per trade */
     maxPositionPercent: 0.95,
   },
   risk: {
-    maxRiskPerTrade: 0.03,
-    takeProfitPercent: 0.015,
-    stopLossPercent: 0.03,
-    maxDailyLossPercent: 0.02,
-    trailingActivationPercent: 0.01,
-    trailingStopPercent: 0.005,
+    /** Risk per trade as % of capital */
+    maxRiskPerTrade: 0.006,
+    /** +0.5% take profit */
+    takeProfitPercent: 0.005,
+    /** −0.6% stop loss */
+    stopLossPercent: 0.006,
+    maxDailyLossPercent: 0.03,
+    /** Trailing stop disabled by default — activate after backtesting */
+    trailingActivationPercent: 1.0,
+    trailingStopPercent: 0.003,
   },
   position: {
-    maxHoldHours: 6,
-    minSignalStrength: 0.60,
+    /** Max hours to hold before time-exit */
+    maxHoldHours: 2,
+    /** Minimum strategy confidence score to execute a trade (0–100) */
+    minScore: 95,
   },
   api: {
     // Cloud hosts (Railway, Render) inject PORT automatically
@@ -64,10 +71,6 @@ export function validateConfig(): void {
 
   if (config.risk.takeProfitPercent <= 0 || config.risk.stopLossPercent <= 0) {
     throw new Error('takeProfitPercent and stopLossPercent must be positive');
-  }
-
-  if (config.trading.targetProfitUsdt <= 0) {
-    throw new Error('targetProfitUsdt must be positive');
   }
 
   if (config.trading.maxPositionPercent <= 0 || config.trading.maxPositionPercent > 1) {
