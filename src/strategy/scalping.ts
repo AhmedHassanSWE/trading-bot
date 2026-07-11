@@ -258,11 +258,14 @@ export class ScalpingStrategy {
   }
 }
 
-export function logSignal(signal: TradeSignal): void {
+export function logSignal(signal: TradeSignal, symbol?: string): void {
+  const pair = symbol ?? signal.symbol ?? '';
+  const prefix = pair ? `${pair} ` : '';
+
   if (signal.signal === 'none') {
-    logger.debug(signal.reason);
+    logger.debug(`${prefix}${signal.reason}`);
   } else {
-    logger.info(`Signal: ${signal.signal.toUpperCase()} (strength: ${(signal.strength * 100).toFixed(0)}%)`, {
+    logger.info(`${prefix}Signal: ${signal.signal.toUpperCase()} (strength: ${(signal.strength * 100).toFixed(0)}%)`, {
       price: signal.price,
       reason: signal.reason,
     });

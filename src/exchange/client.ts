@@ -25,12 +25,12 @@ export class ExchangeClient {
 
   async initialize(): Promise<void> {
     await this.exchange.loadMarkets();
-    logger.info(`Connected to Binance — ${config.trading.symbol} loaded`);
+    logger.info(`Connected to Binance — watchlist: ${config.trading.watchlist.join(', ')}`);
   }
 
-  async fetchCandles(limit: number): Promise<Candle[]> {
+  async fetchCandles(symbol: string, limit: number): Promise<Candle[]> {
     const ohlcv: OHLCV[] = await this.exchange.fetchOHLCV(
-      config.trading.symbol,
+      symbol,
       config.trading.timeframe,
       undefined,
       limit
@@ -57,27 +57,24 @@ export class ExchangeClient {
     };
   }
 
-  /** USDT-only view for trading when no position is open */
   async getUsdtTradingBalance(): Promise<PortfolioBalance> {
     const wallet = await this.getWalletBalance();
-    const baseAsset = config.trading.symbol.split('/')[0];
     return {
       ...wallet,
-      baseAsset,
+      baseAsset: 'USDT',
       baseHoldings: 0,
       baseValueUsdt: 0,
       portfolioValueUsdt: wallet.totalUsdt,
     };
   }
 
-  /** Total portfolio value = USDT cash + base asset (e.g. BTC) valued in USDT */
-  async getPortfolioBalance(): Promise<PortfolioBalance> {
+  async getPortfolioBalance(symbol: string): Promise<PortfolioBalance> {
     const balance = await this.exchange.fetchBalance();
     const usdt = balance.USDT ?? { total: 0, free: 0, used: 0 };
-    const baseAsset = config.trading.symbol.split('/')[0];
+    const baseAsset = symbol.split('/')[0];
     const base = balance[baseAsset] ?? { total: 0, free: 0, used: 0 };
     const baseHoldings = base.total ?? 0;
-    const currentPrice = await this.getCurrentPrice();
+    const currentPrice = await this.getCurrentPrice(symbol);
     const baseValueUsdt = baseHoldings * currentPrice;
 
     return {
@@ -91,115 +88,88 @@ export class ExchangeClient {
     };
   }
 
-  async getCurrentPrice(): Promise<number> {
-    const ticker = await this.exchange.fetchTicker(config.trading.symbol);
+  async getCurrentPrice(symbol: string): Promise<number> {
+    const ticker = await this.exchange.fetchTicker(symbol);
     return ticker.last ?? ticker.close ?? 0;
   }
 
-  async placeMarketOrder(side: Side, quantity: number): Promise<string> {
-    const order = await this.exchange.createOrder(
-      config.trading.symbol,
-      'market',
-      side,
-      quantity
-    );
+  async placeMarketOrder(symbol: string, side: Side, quantity: number): Promise<string> {
+    const order = await this.exchange.createOrder(symbol, 'market', side, quantity);
     const orderId = order.id ?? `order-${Date.now()}`;
-    logger.info(`Market ${side} order placed`, { orderId, quantity });
+    logger.info(`Market ${side} order placed`, { symbol, orderId, quantity });
     return orderId;
   }
 
   async placeLimitOrder(
+    symbol: string,
     side: Side,
     quantity: number,
     price: number
   ): Promise<string> {
-    const order = await this.exchange.createOrder(
-      config.trading.symbol,
-      'limit',
-      side,
-      quantity,
-      price
-    );
+    const order = await this.exchange.createOrder(symbol, 'limit', side, quantity, price);
     const orderId = order.id ?? `order-${Date.now()}`;
-    logger.info(`Limit ${side} order placed`, { orderId, quantity, price });
+    logger.info(`Limit ${side} order placed`, { symbol, orderId, quantity, price });
     return orderId;
   }
 
-  async cancelAllOpenOrders(): Promise<void> {
-    await this.exchange.cancelAllOrders(config.trading.symbol);
-    logger.info('Cancelled all open orders');
+  async cancelAllOpenOrders(symbol: string): Promise<void> {
+    await this.exchange.cancelAllOrders(symbol);
+    logger.info('Cancelled all open orders', { symbol });
   }
 
-  /** Sell all base asset (BTC) holdings and return USDT balance */
-  async convertHoldingsToUsdt(): Promise<number> {
-    try {
-      const wallet = await this.getWalletBalance();
-      const balance = await this.exchange.fetchBalance();
-      const baseAsset = config.trading.symbol.split('/')[0];
-      const baseHoldings = balance[baseAsset]?.free ?? balance[baseAsset]?.total ?? 0;
+  /** Sell watchlist base-asset holdings back to USDT on startup */
+  async convertWatchlistHoldingsToUsdt(skipSymbol?: string): Promise<number> {
+    for (const pair of config.trading.watchlist) {
+      if (pair === skipSymbol) continue;
 
-      if (baseHoldings <= 0) {
-        return wallet.freeUsdt;
+      const baseAsset = pair.split('/')[0];
+      try {
+        const balance = await this.exchange.fetchBalance();
+        const baseHoldings = balance[baseAsset]?.free ?? balance[baseAsset]?.total ?? 0;
+        if (baseHoldings <= 0) continue;
+
+        const quantity = this.formatQuantity(pair, baseHoldings);
+        const price = await this.getCurrentPrice(pair);
+        const notional = quantity * price;
+        const { minAmount, minCost } = this.getMarketPrecision(pair);
+        const effectiveMin = Math.max(minAmount, 0.00001);
+
+        if (quantity <= effectiveMin || notional < minCost) {
+          logger.info('Skipping dust conversion', { pair, holdings: baseHoldings });
+          continue;
+        }
+
+        await this.placeMarketOrder(pair, 'sell', quantity);
+        logger.info('Converted holdings back to USDT', { pair, sold: quantity });
+      } catch (err) {
+        logger.warn('Conversion skipped', { pair, error: String(err) });
       }
-
-      const quantity = this.formatQuantity(baseHoldings);
-      const price = await this.getCurrentPrice();
-      const notional = quantity * price;
-      const { minAmount, minCost } = this.getMarketPrecision();
-
-      // Binance rejects amounts <= 0.00001 BTC — use strict greater-than check
-      const effectiveMin = Math.max(minAmount, 0.00001);
-      if (quantity <= effectiveMin || notional < minCost) {
-        logger.info('Skipping BTC→USDT conversion (dust or below minimum)', {
-          holdings: baseHoldings,
-          quantity,
-          effectiveMin,
-          notional,
-        });
-        return wallet.freeUsdt;
-      }
-
-      await this.placeMarketOrder('sell', quantity);
-      const updated = await this.getWalletBalance();
-      logger.info('Converted BTC holdings back to USDT', {
-        sold: quantity,
-        usdtBalance: updated.freeUsdt,
-      });
-      return updated.freeUsdt;
-    } catch (err) {
-      const wallet = await this.getWalletBalance().catch(() => ({ freeUsdt: 0, totalUsdt: 0, usedUsdt: 0 }));
-      logger.warn('BTC→USDT conversion skipped — bot continuing with USDT', {
-        error: String(err),
-      });
-      return wallet.freeUsdt;
     }
+
+    const updated = await this.getWalletBalance();
+    return updated.freeUsdt;
   }
 
-  getMarketPrecision(): { minAmount: number; minCost: number } {
-    const market = this.exchange.market(config.trading.symbol);
+  getMarketPrecision(symbol: string): { minAmount: number; minCost: number } {
+    const market = this.exchange.market(symbol);
     const minAmount = Math.max(market.limits?.amount?.min ?? 0, 0.00001);
-
     return {
       minAmount,
       minCost: market.limits?.cost?.min ?? config.trading.minOrderUsdt,
     };
   }
 
-  isOrderSizeValid(quantity: number, price: number): boolean {
-    const { minAmount, minCost } = this.getMarketPrecision();
+  isOrderSizeValid(symbol: string, quantity: number, price: number): boolean {
+    const { minAmount, minCost } = this.getMarketPrecision(symbol);
     return quantity > minAmount && quantity * price >= minCost;
   }
 
-  formatQuantity(quantity: number): number {
-    return parseFloat(
-      this.exchange.amountToPrecision(config.trading.symbol, quantity)
-    );
+  formatQuantity(symbol: string, quantity: number): number {
+    return parseFloat(this.exchange.amountToPrecision(symbol, quantity));
   }
 
-  formatPrice(price: number): number {
-    return parseFloat(
-      this.exchange.priceToPrecision(config.trading.symbol, price)
-    );
+  formatPrice(symbol: string, price: number): number {
+    return parseFloat(this.exchange.priceToPrecision(symbol, price));
   }
 }
 

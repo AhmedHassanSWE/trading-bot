@@ -16,6 +16,7 @@ export interface TradeSignal {
   price: number;
   reason: string;
   strength: number;
+  symbol?: string;
 }
 
 export interface PositionSize {
@@ -94,6 +95,7 @@ export interface DashboardSnapshot {
   running: boolean;
   testnet: boolean;
   symbol: string;
+  watchlist: string[];
   currentPrice: number;
   totalPnl: number;
   totalPnlPct: number;

@@ -7,6 +7,11 @@ import { BotPersistentState } from '../store/persistentState';
 import { logger } from '../utils/logger';
 import { DashboardSnapshot, OpenPosition, Side, Signal, TradeSignal } from '../types';
 
+interface RankedSignal {
+  symbol: string;
+  signal: TradeSignal;
+}
+
 export class TradingBot {
   private exchange: ExchangeClient;
   private riskManager: RiskManager;
@@ -28,8 +33,18 @@ export class TradingBot {
     return this.running;
   }
 
+  private activeSymbol(): string {
+    if (this.openPosition) return this.openPosition.symbol;
+    if (this.lastSignal?.symbol) return this.lastSignal.symbol;
+    return config.trading.watchlist[0];
+  }
+
   async getDashboardSnapshot(): Promise<DashboardSnapshot> {
-    const currentPrice = await this.exchange.getCurrentPrice();
+    const displaySymbol = this.activeSymbol();
+    const currentPrice = this.openPosition
+      ? await this.exchange.getCurrentPrice(this.openPosition.symbol)
+      : this.lastSignal?.price ?? await this.exchange.getCurrentPrice(displaySymbol).catch(() => 0);
+
     const startingBalance = config.trading.tradingCapital;
     const realizedPnl = this.store.getRealizedPnl();
 
@@ -37,17 +52,18 @@ export class TradingBot {
     let openPosition: DashboardSnapshot['openPosition'] = null;
     if (this.openPosition) {
       const pos = this.openPosition;
+      const posPrice = await this.exchange.getCurrentPrice(pos.symbol);
       const isLong = pos.side === 'buy';
       unrealizedPnl = isLong
-        ? (currentPrice - pos.entryPrice) * pos.quantity
-        : (pos.entryPrice - currentPrice) * pos.quantity;
+        ? (posPrice - pos.entryPrice) * pos.quantity
+        : (pos.entryPrice - posPrice) * pos.quantity;
       const unrealizedPnlPct = isLong
-        ? ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100
-        : ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100;
+        ? ((posPrice - pos.entryPrice) / pos.entryPrice) * 100
+        : ((pos.entryPrice - posPrice) / pos.entryPrice) * 100;
 
       openPosition = {
         ...pos,
-        currentPrice,
+        currentPrice: posPrice,
         unrealizedPnlUsdt: unrealizedPnl,
         unrealizedPnlPct,
         heldMinutes: (Date.now() - pos.openedAt) / 60000,
@@ -63,7 +79,8 @@ export class TradingBot {
       currentBalance,
       running: this.running,
       testnet: config.exchange.useTestnet,
-      symbol: config.trading.symbol,
+      symbol: displaySymbol,
+      watchlist: [...config.trading.watchlist],
       currentPrice,
       totalPnl,
       totalPnlPct,
@@ -111,7 +128,6 @@ export class TradingBot {
     this.exchangeInitialized = true;
   }
 
-  /** One scan cycle for Vercel cron (no setInterval). */
   async runTick(): Promise<void> {
     this.running = true;
     await this.scan();
@@ -129,22 +145,23 @@ export class TradingBot {
     await this.ensureInitialized(false);
     this.running = true;
 
-    // Convert any leftover BTC from previous sessions back to USDT
-    const usdtBalance = await this.exchange.convertHoldingsToUsdt();
+    const usdtBalance = await this.exchange.convertWatchlistHoldingsToUsdt(
+      this.openPosition?.symbol
+    );
 
     this.store.addEvent('info', 'Bot started', {
       tradingCapital: config.trading.tradingCapital,
       usdtBalance,
-      symbol: config.trading.symbol,
+      watchlist: config.trading.watchlist,
     });
 
     logger.info('Bot started', {
-      symbol: config.trading.symbol,
+      watchlist: config.trading.watchlist.join(', '),
       tradingCapital: `${config.trading.tradingCapital.toFixed(2)} USDT`,
       usdtBalance: `${usdtBalance.toFixed(2)} USDT`,
       riskPerTrade: `${(config.risk.maxRiskPerTrade * 100).toFixed(2)}%`,
-      takeProfit: `${(config.risk.takeProfitMin * 100).toFixed(1)}–${(config.risk.takeProfitMax * 100).toFixed(1)}%`,
-      stopLoss: `${(config.risk.stopLossPercent * 100).toFixed(2)}%`,
+      takeProfit: `${(config.risk.takeProfitPercent * 100).toFixed(1)}%`,
+      stopLoss: `${(config.risk.stopLossPercent * 100).toFixed(1)}%`,
       trailingActivation: `${(config.risk.trailingActivationPercent * 100).toFixed(2)}%`,
       trailingStop: `${(config.risk.trailingStopPercent * 100).toFixed(2)}%`,
       maxHoldHours: config.position.maxHoldHours,
@@ -167,6 +184,29 @@ export class TradingBot {
     logger.info('Bot stopped', { stats: this.riskManager.getStats() });
   }
 
+  private async findBestSignal(): Promise<RankedSignal | null> {
+    let best: RankedSignal | null = null;
+
+    for (const symbol of config.trading.watchlist) {
+      try {
+        const candles = await this.exchange.fetchCandles(symbol, config.trading.candleLimit);
+        const signal = this.strategy.analyze(candles);
+
+        if (signal.signal === 'none') continue;
+        if (signal.signal === 'short' && config.trading.mode === 'spot') continue;
+        if (signal.strength < config.position.minSignalStrength) continue;
+
+        if (!best || signal.strength > best.signal.strength) {
+          best = { symbol, signal: { ...signal, symbol } };
+        }
+      } catch (err) {
+        logger.warn(`Scan failed for ${symbol}`, { error: String(err) });
+      }
+    }
+
+    return best;
+  }
+
   private async scan(): Promise<void> {
     if (!this.running) return;
 
@@ -183,30 +223,29 @@ export class TradingBot {
       return;
     }
 
-    const candles = await this.exchange.fetchCandles(config.trading.candleLimit);
-    const signal = this.strategy.analyze(candles);
-    this.lastSignal = signal;
-    logSignal(signal);
+    const best = await this.findBestSignal();
 
-    if (signal.signal === 'none' || signal.strength < config.position.minSignalStrength) return;
-
-    if (signal.signal === 'short' && config.trading.mode === 'spot') {
-      logger.debug('Short signal ignored in spot mode (long only)');
+    if (!best) {
+      this.lastSignal = { signal: 'none', price: 0, reason: 'No signals across watchlist', strength: 0 };
       return;
     }
 
+    this.lastSignal = best.signal;
+    logSignal(best.signal, best.symbol);
+
     const positionSize = this.riskManager.calculatePositionSize(
       portfolio,
-      signal.price,
-      signal.signal
+      best.signal.price,
+      best.signal.signal
     );
 
     if (!positionSize) return;
 
-    await this.openTrade(signal.signal, signal.price, positionSize);
+    await this.openTrade(best.symbol, best.signal.signal, best.signal.price, positionSize);
   }
 
   private async openTrade(
+    symbol: string,
     signal: Signal,
     entryPrice: number,
     size: {
@@ -218,28 +257,28 @@ export class TradingBot {
     }
   ): Promise<void> {
     const side: Side = signal === 'long' ? 'buy' : 'sell';
-    const quantity = this.exchange.formatQuantity(size.quantity);
+    const quantity = this.exchange.formatQuantity(symbol, size.quantity);
 
     if (quantity <= 0) {
-      logger.warn('Quantity rounded to zero, skipping trade');
+      logger.warn('Quantity rounded to zero, skipping trade', { symbol });
       return;
     }
 
-    if (!this.exchange.isOrderSizeValid(quantity, entryPrice)) {
-      const { minAmount } = this.exchange.getMarketPrecision();
-      logger.warn('Quantity below market minimum', { quantity, minAmount });
+    if (!this.exchange.isOrderSizeValid(symbol, quantity, entryPrice)) {
+      const { minAmount } = this.exchange.getMarketPrecision(symbol);
+      logger.warn('Quantity below market minimum', { symbol, quantity, minAmount });
       return;
     }
 
     try {
-      const orderId = await this.exchange.placeMarketOrder(side, quantity);
-      const fillPrice = await this.exchange.getCurrentPrice();
-      const stopLoss = this.exchange.formatPrice(size.stopLossPrice);
-      const takeProfit = this.exchange.formatPrice(size.takeProfitPrice);
+      const orderId = await this.exchange.placeMarketOrder(symbol, side, quantity);
+      const fillPrice = await this.exchange.getCurrentPrice(symbol);
+      const stopLoss = this.exchange.formatPrice(symbol, size.stopLossPrice);
+      const takeProfit = this.exchange.formatPrice(symbol, size.takeProfitPrice);
 
       this.openPosition = {
         id: orderId,
-        symbol: config.trading.symbol,
+        symbol,
         side,
         entryPrice: fillPrice,
         quantity,
@@ -251,6 +290,7 @@ export class TradingBot {
       };
 
       logger.info('Position OPENED', {
+        symbol,
         side: signal.toUpperCase(),
         entry: fillPrice,
         quantity,
@@ -259,32 +299,33 @@ export class TradingBot {
         risk: `${size.riskAmount.toFixed(2)} USDT`,
         notional: `${size.notionalUsdt.toFixed(2)} USDT`,
       });
-      this.store.addEvent('info', `Position opened (${signal.toUpperCase()})`, {
+      this.store.addEvent('info', `Position opened (${signal.toUpperCase()} ${symbol})`, {
+        symbol,
         entry: fillPrice,
         quantity,
         takeProfit,
         stopLoss,
       });
     } catch (err) {
-      logger.error('Failed to open position', { error: String(err) });
+      logger.error('Failed to open position', { symbol, error: String(err) });
     }
   }
 
   private async manageOpenPosition(): Promise<void> {
     if (!this.openPosition) return;
 
-    const currentPrice = await this.exchange.getCurrentPrice();
     const pos = this.openPosition;
+    const currentPrice = await this.exchange.getCurrentPrice(pos.symbol);
     const isLong = pos.side === 'buy';
 
-    // ── Update peak price & trailing stop ─────────────────────────────────
     this.updateTrailingStop(pos, currentPrice, isLong);
 
     const unrealizedPct = isLong
       ? (currentPrice - pos.entryPrice) / pos.entryPrice
       : (pos.entryPrice - currentPrice) / pos.entryPrice;
 
-    logger.debug(`Position monitor`, {
+    logger.debug('Position monitor', {
+      symbol: pos.symbol,
       side: pos.side,
       entry: pos.entryPrice,
       current: currentPrice,
@@ -294,7 +335,6 @@ export class TradingBot {
       held: `${((Date.now() - pos.openedAt) / 60000).toFixed(1)}m`,
     });
 
-    // ── Check take profit ─────────────────────────────────────────────────
     const hitTakeProfit = isLong
       ? currentPrice >= pos.takeProfit
       : currentPrice <= pos.takeProfit;
@@ -304,7 +344,6 @@ export class TradingBot {
       return;
     }
 
-    // ── Check trailing stop (takes priority over fixed stop once active) ──
     if (pos.trailingStop !== null) {
       const hitTrailingStop = isLong
         ? currentPrice <= pos.trailingStop
@@ -316,7 +355,6 @@ export class TradingBot {
       }
     }
 
-    // ── Check fixed stop loss ─────────────────────────────────────────────
     const hitStopLoss = isLong
       ? currentPrice <= pos.stopLoss
       : currentPrice >= pos.stopLoss;
@@ -326,7 +364,6 @@ export class TradingBot {
       return;
     }
 
-    // ── Max hold time exit ────────────────────────────────────────────────
     const maxHoldMs = config.position.maxHoldHours * 60 * 60 * 1000;
     if (Date.now() - pos.openedAt > maxHoldMs) {
       await this.closePosition('time_exit', currentPrice);
@@ -340,25 +377,22 @@ export class TradingBot {
       ? (currentPrice - pos.entryPrice) / pos.entryPrice
       : (pos.entryPrice - currentPrice) / pos.entryPrice;
 
-    // Only activate trailing once we are sufficiently in profit
     if (gainPct < trailingActivationPercent) return;
 
-    // Update peak price
     if (isLong && currentPrice > pos.peakPrice) {
       pos.peakPrice = currentPrice;
     } else if (!isLong && currentPrice < pos.peakPrice) {
       pos.peakPrice = currentPrice;
     }
 
-    // Calculate new trailing stop from peak
     const newTrailingStop = isLong
       ? pos.peakPrice * (1 - trailingStopPercent)
       : pos.peakPrice * (1 + trailingStopPercent);
 
-    // Only move trailing stop in the favorable direction
     if (pos.trailingStop === null) {
       pos.trailingStop = newTrailingStop;
       logger.info('Trailing stop activated', {
+        symbol: pos.symbol,
         entry: pos.entryPrice,
         peak: pos.peakPrice,
         trailingStop: pos.trailingStop.toFixed(2),
@@ -381,7 +415,7 @@ export class TradingBot {
     const exitSide = positionToExitSide(pos);
 
     try {
-      await this.exchange.placeMarketOrder(exitSide, pos.quantity);
+      await this.exchange.placeMarketOrder(pos.symbol, exitSide, pos.quantity);
 
       const pnl =
         pos.side === 'buy'
@@ -413,6 +447,7 @@ export class TradingBot {
 
       const emoji = pnl >= 0 ? '✅ WIN' : '❌ LOSS';
       logger.info(`Position CLOSED (${reason}) ${emoji}`, {
+        symbol: pos.symbol,
         entry: pos.entryPrice,
         exit: exitPrice,
         pnlPct: `${pnlPct.toFixed(3)}%`,
@@ -420,14 +455,15 @@ export class TradingBot {
         heldMinutes: heldMinutes.toFixed(1),
         stats: this.riskManager.getStats(),
       });
-      this.store.addEvent(pnl >= 0 ? 'info' : 'warn', `Position closed (${reason})`, {
+      this.store.addEvent(pnl >= 0 ? 'info' : 'warn', `Position closed (${reason}) ${pos.symbol}`, {
+        symbol: pos.symbol,
         pnlUsdt: pnl,
         pnlPct,
         entry: pos.entryPrice,
         exit: exitPrice,
       });
     } catch (err) {
-      logger.error('Failed to close position', { error: String(err) });
+      logger.error('Failed to close position', { symbol: pos.symbol, error: String(err) });
     } finally {
       this.openPosition = null;
     }

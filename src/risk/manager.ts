@@ -35,10 +35,16 @@ export class RiskManager {
   canTrade(portfolio: PortfolioBalance): { allowed: boolean; reason: string } {
     this.resetIfNewDay();
 
-    if (portfolio.freeUsdt < config.trading.minOrderUsdt) {
+    const equity = Math.min(portfolio.freeUsdt, config.trading.tradingCapital);
+    const minNeeded = Math.max(
+      config.trading.minOrderUsdt,
+      config.trading.targetProfitUsdt / config.risk.takeProfitPercent
+    );
+
+    if (equity < minNeeded) {
       return {
         allowed: false,
-        reason: `Insufficient USDT: ${portfolio.freeUsdt.toFixed(2)} (min ${config.trading.minOrderUsdt})`,
+        reason: `Insufficient USDT: ${equity.toFixed(2)} (need ~${minNeeded.toFixed(0)} for $${config.trading.targetProfitUsdt} target)`,
       };
     }
 
@@ -54,9 +60,8 @@ export class RiskManager {
   }
 
   /**
-   * Position sizing: risk exactly maxRiskPerTrade % of total wallet.
-   * Uses full available capital only as the notional cap — actual size
-   * is driven by stop distance so dollar risk stays at 0.2%.
+   * Size positions so a take-profit hit earns at least targetProfitUsdt ($10).
+   * Capped by maxPositionPercent of trading capital and max risk per trade.
    */
   calculatePositionSize(
     portfolio: PortfolioBalance,
@@ -66,34 +71,47 @@ export class RiskManager {
     if (signal === 'none' || entryPrice <= 0) return null;
 
     const equity = Math.min(portfolio.freeUsdt, config.trading.tradingCapital);
-    const riskAmount = equity * config.risk.maxRiskPerTrade;
+    const takeProfitPercent = config.risk.takeProfitPercent;
     const stopDistance = entryPrice * config.risk.stopLossPercent;
 
-    if (stopDistance <= 0) return null;
+    if (stopDistance <= 0 || takeProfitPercent <= 0) return null;
 
-    let quantity = riskAmount / stopDistance;
-    let notionalUsdt = quantity * entryPrice;
-
-    // Hard cap: never exceed 5% of portfolio per trade (safety guard)
     const maxNotional = Math.min(
       portfolio.freeUsdt * 0.99,
-      equity * 0.05
+      equity * config.trading.maxPositionPercent
     );
 
-    if (notionalUsdt > maxNotional) {
-      quantity = maxNotional / entryPrice;
-      notionalUsdt = quantity * entryPrice;
-    }
+    // Notional needed so TP pays at least targetProfitUsdt
+    const profitTargetNotional = config.trading.targetProfitUsdt / takeProfitPercent;
 
-    if (quantity * entryPrice < config.trading.minOrderUsdt) {
+    // Notional allowed by risk budget (loss at stop = maxRiskPerTrade * equity)
+    const riskAmount = equity * config.risk.maxRiskPerTrade;
+    const riskBasedNotional = (riskAmount / stopDistance) * entryPrice;
+
+    let notionalUsdt = Math.min(
+      Math.max(profitTargetNotional, riskBasedNotional),
+      maxNotional
+    );
+
+    if (notionalUsdt < config.trading.minOrderUsdt) {
       logger.warn('Position too small for exchange minimum', {
-        notional: quantity * entryPrice,
+        notional: notionalUsdt,
         min: config.trading.minOrderUsdt,
       });
       return null;
     }
 
-    const takeProfitPercent = this.pickTakeProfit(signal);
+    const expectedProfit = notionalUsdt * takeProfitPercent;
+    if (expectedProfit < config.trading.targetProfitUsdt * 0.95) {
+      logger.warn('Cannot reach profit target with available capital', {
+        expectedProfit: expectedProfit.toFixed(2),
+        target: config.trading.targetProfitUsdt,
+        maxNotional: maxNotional.toFixed(2),
+      });
+      return null;
+    }
+
+    const quantity = notionalUsdt / entryPrice;
     const stopLossPrice =
       signal === 'long'
         ? entryPrice * (1 - config.risk.stopLossPercent)
@@ -104,18 +122,26 @@ export class RiskManager {
         ? entryPrice * (1 + takeProfitPercent)
         : entryPrice * (1 - takeProfitPercent);
 
+    const actualRisk = notionalUsdt * config.risk.stopLossPercent;
+
+    logger.info('Position sized for profit target', {
+      notional: `${notionalUsdt.toFixed(2)} USDT`,
+      expectedProfit: `${expectedProfit.toFixed(2)} USDT`,
+      riskAtStop: `${actualRisk.toFixed(2)} USDT`,
+      takeProfitPct: `${(takeProfitPercent * 100).toFixed(1)}%`,
+    });
+
     return {
       quantity,
-      notionalUsdt: quantity * entryPrice,
+      notionalUsdt,
       stopLossPrice,
       takeProfitPrice,
-      riskAmount,
+      riskAmount: actualRisk,
     };
   }
 
-  private pickTakeProfit(_signal: Signal): number {
-    const { takeProfitMin, takeProfitMax } = config.risk;
-    return takeProfitMin + (takeProfitMax - takeProfitMin) * 0.5;
+  getRewardRiskRatio(): number {
+    return config.risk.takeProfitPercent / config.risk.stopLossPercent;
   }
 
   recordTrade(pnl: number): void {
@@ -145,11 +171,5 @@ export class RiskManager {
   exportStats(): { stats: BotStats; dayStart: string } {
     this.resetIfNewDay();
     return { stats: { ...this.stats }, dayStart: this.dayStart };
-  }
-
-  getRewardRiskRatio(): number {
-    const avgTp =
-      (config.risk.takeProfitMin + config.risk.takeProfitMax) / 2;
-    return avgTp / config.risk.stopLossPercent;
   }
 }

@@ -141,6 +141,25 @@
       color: var(--muted);
     }
     .meta-row span strong { color: var(--text); }
+    .watchlist-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 24px;
+    }
+    .watchlist-chip {
+      font-size: 0.7rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(59,130,246,0.1);
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .watchlist-chip.active {
+      background: rgba(59,130,246,0.2);
+      color: var(--blue);
+      border-color: rgba(59,130,246,0.4);
+    }
   </style>
 </head>
 <body>
@@ -177,18 +196,25 @@
   </div>
 
   <div class="meta-row">
-    <span>BTC Price: <strong id="btcPrice">—</strong></span>
+    <span>Active Pair: <strong id="activePair">—</strong></span>
+    <span>Price: <strong id="btcPrice">—</strong></span>
     <span>Today's P&amp;L: <strong id="dailyPnl">—</strong></span>
     <span>Win Rate: <strong id="winRate">—</strong></span>
-    <span>Last Signal: <strong id="lastSignal">—</strong></span>
+    <span>Best Signal: <strong id="lastSignal">—</strong></span>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Watchlist (10 pairs)</div>
+    <div class="watchlist-row" id="watchlistRow"></div>
   </div>
 
   <div class="section">
     <div class="section-title">Open Position</div>
     <div class="card" id="positionCard">
-      <div class="empty" id="noPosition">No open position — scanning for signals...</div>
+      <div class="empty" id="noPosition">No open position — scanning 10 pairs for best signal...</div>
       <div id="positionDetails" style="display:none">
         <div class="position-grid">
+          <div class="position-item"><label>Pair</label><span id="posSymbol">—</span></div>
           <div class="position-item"><label>Side</label><span id="posSide">—</span></div>
           <div class="position-item"><label>Entry</label><span id="posEntry">—</span></div>
           <div class="position-item"><label>Current</label><span id="posCurrent">—</span></div>
@@ -209,6 +235,7 @@
         <thead>
           <tr>
             <th>Time</th>
+            <th>Pair</th>
             <th>Side</th>
             <th>Entry</th>
             <th>Exit</th>
@@ -219,7 +246,7 @@
           </tr>
         </thead>
         <tbody id="tradesBody">
-          <tr><td colspan="8" class="empty">No trades yet</td></tr>
+          <tr><td colspan="9" class="empty">No trades yet</td></tr>
         </tbody>
       </table>
     </div>
@@ -291,14 +318,23 @@
         badge.textContent = 'Offline';
         badge.className = 'badge badge-off';
       }
-      document.getElementById('symbolBadge').textContent = d.symbol;
+      document.getElementById('symbolBadge').textContent =
+        d.openPosition ? d.openPosition.symbol : (d.watchlist ? d.watchlist.length + ' pairs' : d.symbol);
 
-      // Top bar only
+      document.getElementById('activePair').textContent = d.symbol || '—';
+      document.getElementById('btcPrice').textContent = d.currentPrice ? '$' + fmt(d.currentPrice) : '—';
+
+      const watchlistEl = document.getElementById('watchlistRow');
+      if (d.watchlist && d.watchlist.length) {
+        const active = d.openPosition?.symbol || d.lastSignal?.symbol || '';
+        watchlistEl.innerHTML = d.watchlist.map(p =>
+          `<span class="watchlist-chip${p === active ? ' active' : ''}">${p.replace('/USDT', '')}</span>`
+        ).join('');
+      }
+      // Top bar
       setText('startingBalance', fmt(d.startingBalance) + ' USDT');
       setText('currentBalance', fmt(d.currentBalance) + ' USDT', pnlClass(d.currentBalance - d.startingBalance));
 
-      // Meta row
-      document.getElementById('btcPrice').textContent = '$' + fmt(d.currentPrice);
       const dailyEl = document.getElementById('dailyPnl');
       dailyEl.textContent = (d.stats.dailyPnl >= 0 ? '+' : '') + fmt(d.stats.dailyPnl, 4) + ' USDT';
       dailyEl.className = pnlClass(d.stats.dailyPnl);
@@ -309,8 +345,9 @@
       document.getElementById('winRate').textContent = total > 0 ? Math.round((wins / total) * 100) + '% (' + wins + 'W/' + losses + 'L)' : '—';
 
       if (d.lastSignal && d.lastSignal.signal !== 'none') {
+        const pair = d.lastSignal.symbol ? d.lastSignal.symbol + ' ' : '';
         document.getElementById('lastSignal').textContent =
-          d.lastSignal.signal.toUpperCase() + ' @ $' + fmt(d.lastSignal.price) + ' (' + Math.round(d.lastSignal.strength * 100) + '%)';
+          pair + d.lastSignal.signal.toUpperCase() + ' @ $' + fmt(d.lastSignal.price) + ' (' + Math.round(d.lastSignal.strength * 100) + '%)';
       } else {
         document.getElementById('lastSignal').textContent = 'None';
       }
@@ -322,6 +359,7 @@
         const p = d.openPosition;
         noPos.style.display = 'none';
         posDetails.style.display = 'block';
+        document.getElementById('posSymbol').textContent = p.symbol;
         document.getElementById('posSide').textContent = p.side === 'buy' ? 'LONG' : 'SHORT';
         document.getElementById('posEntry').textContent = '$' + fmt(p.entryPrice);
         document.getElementById('posCurrent').textContent = '$' + fmt(p.currentPrice);
@@ -340,11 +378,12 @@
       // Trades
       const tbody = document.getElementById('tradesBody');
       if (!d.recentTrades.length) {
-        tbody.innerHTML = '<tr><td colspan="8" class="empty">No trades yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="empty">No trades yet</td></tr>';
       } else {
         tbody.innerHTML = d.recentTrades.map(t => `
           <tr>
             <td>${fmtTime(t.closedAt)}</td>
+            <td>${t.symbol.replace('/USDT', '')}</td>
             <td>${t.side === 'buy' ? 'LONG' : 'SHORT'}</td>
             <td>$${fmt(t.entryPrice)}</td>
             <td>$${fmt(t.exitPrice)}</td>

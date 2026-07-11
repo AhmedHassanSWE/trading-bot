@@ -11,22 +11,37 @@ export const config = {
   },
   trading: {
     mode: 'spot' as 'spot' | 'futures',
-    symbol: 'BTC/USDT',
+    // Top 10 liquid USDT pairs — bot scans all and trades the strongest signal
+    watchlist: [
+      'BTC/USDT',
+      'ETH/USDT',
+      'SOL/USDT',
+      'BNB/USDT',
+      'XRP/USDT',
+      'DOGE/USDT',
+      'ADA/USDT',
+      'AVAX/USDT',
+      'LINK/USDT',
+      'DOT/USDT',
+    ],
     timeframe: '1m',
     candleLimit: 100,
     scanIntervalMs: 10000,
     minOrderUsdt: 10,
     maxOpenPositions: 1,
     tradingCapital: 1000,
+    /** Minimum USDT profit when take-profit hits */
+    targetProfitUsdt: 10,
+    /** Max % of trading capital per trade (1 position at a time) */
+    maxPositionPercent: 0.95,
   },
   risk: {
-    maxRiskPerTrade: 0.002,
-    takeProfitMin: 0.01,
-    takeProfitMax: 0.02,
-    stopLossPercent: 0.002,
+    maxRiskPerTrade: 0.03,
+    takeProfitPercent: 0.015,
+    stopLossPercent: 0.03,
     maxDailyLossPercent: 0.02,
-    trailingActivationPercent: 0.005,
-    trailingStopPercent: 0.003,
+    trailingActivationPercent: 0.01,
+    trailingStopPercent: 0.005,
   },
   position: {
     maxHoldHours: 6,
@@ -47,7 +62,25 @@ export function validateConfig(): void {
     throw new Error('maxRiskPerTrade must be between 0 and 0.05 (5%)');
   }
 
-  if (config.risk.takeProfitMin >= config.risk.takeProfitMax) {
-    throw new Error('takeProfitMin must be less than takeProfitMax');
+  if (config.risk.takeProfitPercent <= 0 || config.risk.stopLossPercent <= 0) {
+    throw new Error('takeProfitPercent and stopLossPercent must be positive');
+  }
+
+  if (config.trading.targetProfitUsdt <= 0) {
+    throw new Error('targetProfitUsdt must be positive');
+  }
+
+  if (config.trading.maxPositionPercent <= 0 || config.trading.maxPositionPercent > 1) {
+    throw new Error('maxPositionPercent must be between 0 and 1');
+  }
+
+  if (!config.trading.watchlist.length) {
+    throw new Error('watchlist must contain at least one pair');
+  }
+
+  for (const pair of config.trading.watchlist) {
+    if (!pair.endsWith('/USDT')) {
+      throw new Error(`watchlist pairs must be USDT pairs (got ${pair})`);
+    }
   }
 }
