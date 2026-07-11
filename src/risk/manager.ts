@@ -35,7 +35,7 @@ export class RiskManager {
   canTrade(portfolio: PortfolioBalance): { allowed: boolean; reason: string } {
     this.resetIfNewDay();
 
-    const equity = Math.min(portfolio.freeUsdt, config.trading.tradingCapital);
+    const equity = portfolio.freeUsdt;
 
     if (equity < config.trading.minOrderUsdt) {
       return {
@@ -66,7 +66,7 @@ export class RiskManager {
   ): PositionSize | null {
     if (signal === 'none' || entryPrice <= 0) return null;
 
-    const equity = Math.min(portfolio.freeUsdt, config.trading.tradingCapital);
+    const equity = portfolio.freeUsdt;
     const takeProfitPercent = config.risk.takeProfitPercent;
     const stopDistance = entryPrice * config.risk.stopLossPercent;
 
