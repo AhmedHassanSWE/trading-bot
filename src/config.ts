@@ -44,8 +44,8 @@ export const config = {
     minOrderUsdt: 10,
     maxOpenPositions: 1,
     tradingCapital: 1000,
-    /** Max % of trading capital per trade */
-    maxPositionPercent: 0.95,
+    /** Max % of trading capital per trade (was 0.95 — one loss hurt too much) */
+    maxPositionPercent: 0.85,
   },
   /**
    * Binance standard maker/taker fee: 0.1% per side = 0.2% round trip.
@@ -55,24 +55,17 @@ export const config = {
     rate: 0.001, // 0.1% per side
   },
   risk: {
-    /** Risk per trade as % of capital */
-    maxRiskPerTrade: 0.006,
-    /** +0.5% take profit */
-    takeProfitPercent: 0.005,
-    /** −0.6% stop loss */
-    stopLossPercent: 0.006,
+    maxRiskPerTrade: 0.005,
+    /** 0.7% gross ≈ 0.5% net after fees */
+    takeProfitPercent: 0.007,
+    stopLossPercent: 0.0045,
     maxDailyLossPercent: 0.03,
-    /** Trailing stop disabled by default — activate after backtesting */
     trailingActivationPercent: 1.0,
     trailingStopPercent: 0.003,
   },
   position: {
-    /** Max hours to hold before time-exit */
     maxHoldHours: 2,
-    /**
-     * Minimum confidence score to trade (0–100).
-     * Lower = more trades. Current: active profile for actually trading.
-     */
+    /** Active profile — aimed at taking trades in quiet markets */
     minScore: 55,
   },
   api: {
