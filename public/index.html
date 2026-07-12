@@ -15,6 +15,7 @@
       --red: #ef4444;
       --blue: #3b82f6;
       --yellow: #eab308;
+      --purple: #a855f7;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -27,102 +28,112 @@
     header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: flex-start;
       margin-bottom: 24px;
       flex-wrap: wrap;
       gap: 12px;
     }
-    h1 { font-size: 1.5rem; font-weight: 700; }
+    h1 { font-size: 1.4rem; font-weight: 700; }
     .badge {
       display: inline-block;
-      padding: 4px 10px;
+      padding: 3px 9px;
       border-radius: 999px;
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       font-weight: 600;
     }
     .badge-live { background: rgba(34,197,94,0.15); color: var(--green); }
     .badge-test { background: rgba(234,179,8,0.15); color: var(--yellow); }
-    .badge-off { background: rgba(239,68,68,0.15); color: var(--red); }
+    .badge-off  { background: rgba(239,68,68,0.15); color: var(--red); }
+    .badge-mr   { background: rgba(168,85,247,0.15); color: var(--purple); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .card-label { color: var(--muted); font-size: 0.78rem; margin-bottom: 6px; }
+    .card-value { font-size: 1.8rem; font-weight: 700; }
     .top-bar {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
       margin-bottom: 24px;
     }
-    @media (max-width: 520px) {
-      .top-bar { grid-template-columns: 1fr; }
-    }
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 24px;
-    }
-    .card-label { color: var(--muted); font-size: 0.8rem; margin-bottom: 6px; }
-    .card-value { font-size: 2rem; font-weight: 700; }
+    @media (max-width: 520px) { .top-bar { grid-template-columns: 1fr; } }
     .positive { color: var(--green); }
     .negative { color: var(--red); }
     .section { margin-bottom: 24px; }
     .section-title {
-      font-size: 1rem;
+      font-size: 0.82rem;
       font-weight: 600;
       margin-bottom: 12px;
       color: var(--muted);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.06em;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.875rem;
+    .meta-row {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+      font-size: 0.85rem;
+      color: var(--muted);
     }
-    th, td {
-      text-align: left;
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
+    .meta-row span strong { color: var(--text); }
+    .watchlist-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+    .watchlist-chip {
+      font-size: 0.69rem;
+      padding: 3px 8px;
+      border-radius: 6px;
+      background: rgba(59,130,246,0.08);
+      color: var(--muted);
+      border: 1px solid var(--border);
     }
-    th { color: var(--muted); font-weight: 500; }
-    .empty { color: var(--muted); text-align: center; padding: 32px; }
+    .watchlist-chip.active {
+      background: rgba(59,130,246,0.18);
+      color: var(--blue);
+      border-color: rgba(59,130,246,0.4);
+    }
+    .signal-card {
+      border-radius: 12px;
+      padding: 16px;
+      border: 1px solid rgba(168,85,247,0.25);
+      background: rgba(168,85,247,0.06);
+      margin-bottom: 24px;
+    }
+    .signal-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .signal-card-title { font-size: 0.78rem; font-weight: 700; color: var(--purple); letter-spacing: 0.04em; }
+    .signal-score { font-size: 1.3rem; font-weight: 800; color: var(--purple); }
+    .signal-row { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+    .signal-row strong { color: var(--text); }
+    .signal-trade { font-size: 0.85rem; font-weight: 700; margin-top: 8px; }
+    .signal-trade.yes { color: var(--green); }
+    .signal-trade.no  { color: var(--muted); }
     .position-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
       gap: 12px;
     }
-    .position-item label { display: block; color: var(--muted); font-size: 0.75rem; }
-    .position-item span { font-size: 1rem; font-weight: 600; }
-    .events {
-      max-height: 280px;
-      overflow-y: auto;
-      font-size: 0.8rem;
-      font-family: 'SF Mono', Monaco, monospace;
-    }
-    .event {
-      padding: 8px 0;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      gap: 12px;
-    }
+    .position-item label { display: block; color: var(--muted); font-size: 0.72rem; }
+    .position-item span  { font-size: 0.95rem; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    .empty { color: var(--muted); text-align: center; padding: 28px; }
+    .events { max-height: 220px; overflow-y: auto; font-size: 0.78rem; font-family: 'SF Mono', Monaco, monospace; }
+    .event { padding: 7px 0; border-bottom: 1px solid var(--border); display: flex; gap: 12px; }
     .event-time { color: var(--muted); min-width: 70px; }
-    .event-info { color: var(--blue); }
-    .event-warn { color: var(--yellow); }
+    .event-info  { color: var(--blue); }
+    .event-warn  { color: var(--yellow); }
     .event-error { color: var(--red); }
-    .refresh-bar {
-      color: var(--muted);
-      font-size: 0.8rem;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: var(--green);
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
+    .refresh-bar { color: var(--muted); font-size: 0.78rem; display: flex; align-items: center; gap: 8px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
     .error-banner {
       background: rgba(239,68,68,0.1);
       border: 1px solid var(--red);
@@ -132,43 +143,16 @@
       margin-bottom: 16px;
       display: none;
     }
-    .meta-row {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      margin-bottom: 24px;
-      font-size: 0.875rem;
-      color: var(--muted);
-    }
-    .meta-row span strong { color: var(--text); }
-    .watchlist-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-bottom: 24px;
-    }
-    .watchlist-chip {
-      font-size: 0.7rem;
-      padding: 3px 8px;
-      border-radius: 6px;
-      background: rgba(59,130,246,0.1);
-      color: var(--muted);
-      border: 1px solid var(--border);
-    }
-    .watchlist-chip.active {
-      background: rgba(59,130,246,0.2);
-      color: var(--blue);
-      border-color: rgba(59,130,246,0.4);
-    }
   </style>
 </head>
 <body>
   <header>
     <div>
-      <h1>Scalping Bot Dashboard ( Trend Strategy - Low )</h1>
-      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+      <h1>Trend Continuation Strategy</h1>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <span id="statusBadge" class="badge badge-off">Offline</span>
         <span id="symbolBadge" class="badge" style="background:rgba(59,130,246,0.15);color:var(--blue)">—</span>
+        <span class="badge badge-mr">Active · Score ≥55</span>
       </div>
     </div>
     <div class="refresh-bar">
@@ -179,11 +163,9 @@
   </header>
 
   <div id="errorBanner" class="error-banner">
-    <strong>Cannot connect to bot API.</strong><br />
-    Make sure this project is redeployed with the latest code (includes <code>/api/status</code> on Vercel).
+    <strong>Cannot connect to bot API.</strong>
   </div>
 
-  <!-- Top bar: only starting + current balance -->
   <div class="top-bar">
     <div class="card">
       <div class="card-label">Starting Balance (USDT)</div>
@@ -199,19 +181,31 @@
     <span>Active Pair: <strong id="activePair">—</strong></span>
     <span>Price: <strong id="btcPrice">—</strong></span>
     <span>Today's P&amp;L: <strong id="dailyPnl">—</strong></span>
-    <span>Win Rate: <strong id="winRate">—</strong></span>
     <span>Best Signal: <strong id="lastSignal">—</strong></span>
   </div>
 
   <div class="section">
-    <div class="section-title">Watchlist (10 pairs)</div>
     <div class="watchlist-row" id="watchlistRow"></div>
   </div>
 
   <div class="section">
+    <div class="section-title">Current Signal</div>
+    <div class="signal-card">
+      <div class="signal-card-header">
+        <span class="signal-card-title">MEDIUM RISK</span>
+        <span class="signal-score" id="sigScore">—</span>
+      </div>
+      <div class="signal-row">Symbol: <strong id="sigSymbol">—</strong></div>
+      <div class="signal-row">Entry: <strong id="sigEntry">—</strong></div>
+      <div class="signal-row">Note: <strong id="sigNote">—</strong></div>
+      <div class="signal-trade no" id="sigDecision">NO TRADE</div>
+    </div>
+  </div>
+
+  <div class="section">
     <div class="section-title">Open Position</div>
-    <div class="card" id="positionCard">
-      <div class="empty" id="noPosition">No open position — scanning 10 pairs for best signal...</div>
+    <div class="card">
+      <div class="empty" id="noPosition">No open position — scanning...</div>
       <div id="positionDetails" style="display:none">
         <div class="position-grid">
           <div class="position-item"><label>Pair</label><span id="posSymbol">—</span></div>
@@ -221,7 +215,6 @@
           <div class="position-item"><label>Unrealized P&amp;L</label><span id="posPnl">—</span></div>
           <div class="position-item"><label>Take Profit</label><span id="posTp">—</span></div>
           <div class="position-item"><label>Stop Loss</label><span id="posSl">—</span></div>
-          <div class="position-item"><label>Trailing Stop</label><span id="posTrail">—</span></div>
           <div class="position-item"><label>Held</label><span id="posHeld">—</span></div>
         </div>
       </div>
@@ -229,31 +222,28 @@
   </div>
 
   <div class="section">
-    <div class="section-title">Trade History</div>
+    <div class="section-title">Recent Trades</div>
     <div class="card" style="padding:0;overflow:hidden">
       <table>
         <thead>
           <tr>
             <th>Time</th>
             <th>Pair</th>
-            <th>Side</th>
             <th>Entry</th>
             <th>Exit</th>
             <th>P&amp;L</th>
-            <th>%</th>
             <th>Reason</th>
-            <th>Held</th>
           </tr>
         </thead>
         <tbody id="tradesBody">
-          <tr><td colspan="9" class="empty">No trades yet</td></tr>
+          <tr><td colspan="6" class="empty">No trades yet</td></tr>
         </tbody>
       </table>
     </div>
   </div>
 
   <div class="section">
-    <div class="section-title">Recent Events</div>
+    <div class="section-title">Events</div>
     <div class="card events" id="eventsList">
       <div class="empty">No events yet</div>
     </div>
@@ -263,34 +253,19 @@
   <script>
     const BOT_API_URL = window.BOT_API_URL || '';
     const API = (BOT_API_URL || window.location.origin).replace(/\/$/, '');
-    const IS_VERCEL = window.location.hostname.includes('vercel.app');
 
-    function fmt(n, decimals = 2) {
-      if (n === null || n === undefined || isNaN(n)) return '—';
-      return Number(n).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    function fmt(n, d = 2) {
+      if (n == null || isNaN(n)) return '—';
+      return Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
     }
-
     function fmtPct(n) {
-      if (n === null || n === undefined || isNaN(n)) return '—';
-      const sign = n >= 0 ? '+' : '';
-      return sign + n.toFixed(3) + '%';
+      if (n == null || isNaN(n)) return '—';
+      return (n >= 0 ? '+' : '') + Number(n).toFixed(2) + '%';
     }
-
     function fmtTime(ts) {
       return new Date(ts).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     }
-
-    function pnlClass(n) {
-      return n >= 0 ? 'positive' : 'negative';
-    }
-
-    function setText(id, text, cls) {
-      const el = document.getElementById(id);
-      el.textContent = text;
-      if (cls) {
-        el.className = 'card-value ' + cls;
-      }
-    }
+    function pnlClass(n) { return n >= 0 ? 'positive' : 'negative'; }
 
     async function fetchStatus() {
       try {
@@ -299,13 +274,7 @@
         render(await res.json());
         document.getElementById('errorBanner').style.display = 'none';
       } catch {
-        const banner = document.getElementById('errorBanner');
-        banner.style.display = 'block';
-        if (IS_VERCEL && !BOT_API_URL) {
-          banner.innerHTML =
-            '<strong>Bot API not responding.</strong><br>' +
-            'Push the latest code and redeploy. Then add Redis: Vercel → Marketplace → Upstash Redis → Connect to project.';
-        }
+        document.getElementById('errorBanner').style.display = 'block';
       }
     }
 
@@ -318,41 +287,50 @@
         badge.textContent = 'Offline';
         badge.className = 'badge badge-off';
       }
+
       document.getElementById('symbolBadge').textContent =
-        d.openPosition ? d.openPosition.symbol : (d.watchlist ? d.watchlist.length + ' pairs' : d.symbol);
+        d.openPosition ? d.openPosition.symbol : (d.watchlist ? d.watchlist.length + ' pairs' : '—');
 
       document.getElementById('activePair').textContent = d.symbol || '—';
-      document.getElementById('btcPrice').textContent = d.currentPrice ? '$' + fmt(d.currentPrice) : '—';
-
-      const watchlistEl = document.getElementById('watchlistRow');
-      if (d.watchlist && d.watchlist.length) {
-        const active = d.openPosition?.symbol || d.lastSignal?.symbol || '';
-        watchlistEl.innerHTML = d.watchlist.map(p =>
-          `<span class="watchlist-chip${p === active ? ' active' : ''}">${p.replace('/USDT', '')}</span>`
-        ).join('');
-      }
-      // Top bar
-      setText('startingBalance', fmt(d.startingBalance) + ' USDT');
-      setText('currentBalance', fmt(d.currentBalance) + ' USDT', pnlClass(d.currentBalance - d.startingBalance));
+      document.getElementById('btcPrice').textContent = d.currentPrice ? '$' + fmt(d.currentPrice, 6) : '—';
 
       const dailyEl = document.getElementById('dailyPnl');
       dailyEl.textContent = (d.stats.dailyPnl >= 0 ? '+' : '') + fmt(d.stats.dailyPnl, 4) + ' USDT';
       dailyEl.className = pnlClass(d.stats.dailyPnl);
 
-      const wins = d.stats.winsToday;
-      const losses = d.stats.lossesToday;
-      const total = wins + losses;
-      document.getElementById('winRate').textContent = total > 0 ? Math.round((wins / total) * 100) + '% (' + wins + 'W/' + losses + 'L)' : '—';
-
       if (d.lastSignal && d.lastSignal.signal !== 'none') {
         const pair = d.lastSignal.symbol ? d.lastSignal.symbol + ' ' : '';
         document.getElementById('lastSignal').textContent =
-          pair + d.lastSignal.signal.toUpperCase() + ' @ $' + fmt(d.lastSignal.price) + ' (' + Math.round(d.lastSignal.strength * 100) + '%)';
+          pair + 'LONG @ $' + fmt(d.lastSignal.price, 6) + ' (' + Math.round(d.lastSignal.strength * 100) + '%)';
       } else {
-        document.getElementById('lastSignal').textContent = 'None';
+        document.getElementById('lastSignal').textContent = d.lastSignal?.reason
+          ? d.lastSignal.reason.slice(0, 60)
+          : 'None';
       }
 
-      // Open position
+      document.getElementById('startingBalance').textContent = fmt(d.startingBalance, 2) + ' USDT';
+      const curBalEl = document.getElementById('currentBalance');
+      curBalEl.textContent = fmt(d.currentBalance, 2) + ' USDT';
+      curBalEl.className = 'card-value ' + pnlClass(d.currentBalance - d.startingBalance);
+
+      const wEl = document.getElementById('watchlistRow');
+      if (d.watchlist?.length) {
+        const actSym = d.openPosition?.symbol || d.lastSignal?.symbol || '';
+        wEl.innerHTML = d.watchlist.map(p =>
+          `<span class="watchlist-chip${p === actSym ? ' active' : ''}">${p.replace('/USDT', '')}</span>`
+        ).join('');
+      }
+
+      const sig = d.lastSignal;
+      const trading = sig && sig.signal !== 'none';
+      document.getElementById('sigScore').textContent = sig ? Math.round((sig.strength || 0) * 100) + '/100' : '—';
+      document.getElementById('sigSymbol').textContent = sig?.symbol?.replace('/USDT', '') || '—';
+      document.getElementById('sigEntry').textContent = sig?.price ? '$' + fmt(sig.price, 6) : '—';
+      document.getElementById('sigNote').textContent = sig?.reason ? String(sig.reason).slice(0, 120) : '—';
+      const dec = document.getElementById('sigDecision');
+      dec.textContent = trading ? '✅ TRADE' : 'NO TRADE';
+      dec.className = 'signal-trade ' + (trading ? 'yes' : 'no');
+
       const noPos = document.getElementById('noPosition');
       const posDetails = document.getElementById('positionDetails');
       if (d.openPosition) {
@@ -361,46 +339,40 @@
         posDetails.style.display = 'block';
         document.getElementById('posSymbol').textContent = p.symbol;
         document.getElementById('posSide').textContent = p.side === 'buy' ? 'LONG' : 'SHORT';
-        document.getElementById('posEntry').textContent = '$' + fmt(p.entryPrice);
-        document.getElementById('posCurrent').textContent = '$' + fmt(p.currentPrice);
+        document.getElementById('posEntry').textContent = '$' + fmt(p.entryPrice, 6);
+        document.getElementById('posCurrent').textContent = '$' + fmt(p.currentPrice, 6);
         const pnlEl = document.getElementById('posPnl');
         pnlEl.textContent = (p.unrealizedPnlUsdt >= 0 ? '+' : '') + fmt(p.unrealizedPnlUsdt, 4) + ' USDT (' + fmtPct(p.unrealizedPnlPct) + ')';
         pnlEl.className = pnlClass(p.unrealizedPnlUsdt);
-        document.getElementById('posTp').textContent = '$' + fmt(p.takeProfit);
-        document.getElementById('posSl').textContent = '$' + fmt(p.stopLoss);
-        document.getElementById('posTrail').textContent = p.trailingStop ? '$' + fmt(p.trailingStop) : 'Not active';
+        document.getElementById('posTp').textContent = '$' + fmt(p.takeProfit, 6);
+        document.getElementById('posSl').textContent = '$' + fmt(p.stopLoss, 6);
         document.getElementById('posHeld').textContent = p.heldMinutes.toFixed(1) + ' min';
       } else {
         noPos.style.display = 'block';
         posDetails.style.display = 'none';
       }
 
-      // Trades
       const tbody = document.getElementById('tradesBody');
       if (!d.recentTrades.length) {
-        tbody.innerHTML = '<tr><td colspan="9" class="empty">No trades yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="empty">No trades yet</td></tr>';
       } else {
-        tbody.innerHTML = d.recentTrades.map(t => `
+        tbody.innerHTML = d.recentTrades.slice(0, 20).map(t => `
           <tr>
             <td>${fmtTime(t.closedAt)}</td>
             <td>${t.symbol.replace('/USDT', '')}</td>
-            <td>${t.side === 'buy' ? 'LONG' : 'SHORT'}</td>
-            <td>$${fmt(t.entryPrice)}</td>
-            <td>$${fmt(t.exitPrice)}</td>
+            <td>$${fmt(t.entryPrice, 6)}</td>
+            <td>$${fmt(t.exitPrice, 6)}</td>
             <td class="${pnlClass(t.pnlUsdt)}">${t.pnlUsdt >= 0 ? '+' : ''}${fmt(t.pnlUsdt, 4)}</td>
-            <td class="${pnlClass(t.pnlPct)}">${fmtPct(t.pnlPct)}</td>
-            <td>${t.reason.replace('_', ' ')}</td>
-            <td>${t.heldMinutes.toFixed(1)}m</td>
+            <td>${t.reason.replace(/_/g, ' ')}</td>
           </tr>
         `).join('');
       }
 
-      // Events
-      const eventsEl = document.getElementById('eventsList');
+      const evEl = document.getElementById('eventsList');
       if (!d.recentEvents.length) {
-        eventsEl.innerHTML = '<div class="empty">No events yet</div>';
+        evEl.innerHTML = '<div class="empty">No events yet</div>';
       } else {
-        eventsEl.innerHTML = d.recentEvents.map(e => `
+        evEl.innerHTML = d.recentEvents.slice(0, 30).map(e => `
           <div class="event">
             <span class="event-time">${fmtTime(e.timestamp)}</span>
             <span class="event-${e.level}">[${e.level.toUpperCase()}]</span>
@@ -410,14 +382,6 @@
       }
 
       document.getElementById('lastUpdate').textContent = 'Updated ' + fmtTime(d.updatedAt);
-
-      if (d.kvConfigured === false) {
-        const banner = document.getElementById('errorBanner');
-        banner.style.display = 'block';
-        banner.innerHTML =
-          '<strong>Bot is running but needs Redis storage.</strong><br>' +
-          'Vercel → Marketplace → Redis (Upstash) → Add integration → Connect to this project, then redeploy.';
-      }
     }
 
     fetchStatus();

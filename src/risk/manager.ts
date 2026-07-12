@@ -1,6 +1,6 @@
 import { config } from '../config';
 import { logger } from '../utils/logger';
-import { BotStats, PortfolioBalance, PositionSize, Signal, WalletBalance } from '../types';
+import { BotStats, PortfolioBalance, PositionSize, Signal } from '../types';
 
 export class RiskManager {
   private stats: BotStats = {
@@ -32,15 +32,30 @@ export class RiskManager {
     }
   }
 
-  canTrade(portfolio: PortfolioBalance): { allowed: boolean; reason: string } {
+  /**
+   * Trading equity = bot capital that compounds from tradingCapital,
+   * never larger than free USDT on the exchange.
+   *
+   * Example: start 1000, realized +5 → size next trade with min(free, 1005).
+   * Testnet wallet of 14000 will NOT be used — capped at bot capital.
+   */
+  private tradingEquity(freeUsdt: number, realizedPnlUsdt: number): number {
+    const botCapital = config.trading.tradingCapital + realizedPnlUsdt;
+    return Math.min(freeUsdt, Math.max(botCapital, 0));
+  }
+
+  canTrade(
+    portfolio: PortfolioBalance,
+    realizedPnlUsdt = 0
+  ): { allowed: boolean; reason: string } {
     this.resetIfNewDay();
 
-    const equity = portfolio.freeUsdt;
+    const equity = this.tradingEquity(portfolio.freeUsdt, realizedPnlUsdt);
 
     if (equity < config.trading.minOrderUsdt) {
       return {
         allowed: false,
-        reason: `Insufficient USDT: ${equity.toFixed(2)} (minimum ${config.trading.minOrderUsdt} USDT required)`,
+        reason: `Insufficient trading capital: ${equity.toFixed(4)} USDT (minimum ${config.trading.minOrderUsdt})`,
       };
     }
 
@@ -48,7 +63,7 @@ export class RiskManager {
     if (this.stats.dailyPnl <= -maxDailyLoss) {
       return {
         allowed: false,
-        reason: `Daily loss limit reached: ${this.stats.dailyPnl.toFixed(2)} USDT`,
+        reason: `Daily loss limit reached: ${this.stats.dailyPnl.toFixed(4)} USDT`,
       };
     }
 
@@ -56,36 +71,38 @@ export class RiskManager {
   }
 
   /**
-   * Size the position based on the risk budget (maxRiskPerTrade × equity).
-   * Loss at stop ≤ maxRiskPerTrade × equity. Capped by maxPositionPercent.
+   * Size from bot capital only (tradingCapital + realized PnL), capped by free USDT.
+   * At TP (+0.5%) on ~1000 → ~+$5, not tens of dollars from full testnet wallet.
    */
   calculatePositionSize(
     portfolio: PortfolioBalance,
     entryPrice: number,
-    signal: Signal
+    signal: Signal,
+    realizedPnlUsdt = 0
   ): PositionSize | null {
     if (signal === 'none' || entryPrice <= 0) return null;
 
-    const equity = portfolio.freeUsdt;
+    const equity = this.tradingEquity(portfolio.freeUsdt, realizedPnlUsdt);
     const takeProfitPercent = config.risk.takeProfitPercent;
     const stopDistance = entryPrice * config.risk.stopLossPercent;
 
-    if (stopDistance <= 0 || takeProfitPercent <= 0) return null;
+    if (stopDistance <= 0 || takeProfitPercent <= 0 || equity <= 0) return null;
 
     const maxNotional = Math.min(
       portfolio.freeUsdt * 0.99,
       equity * config.trading.maxPositionPercent
     );
 
-    // Size based on risk budget: lose at most maxRiskPerTrade * equity at stop
+    // With stopLossPercent == maxRiskPerTrade, this ≈ full equity (then capped by maxNotional)
     const riskAmount = equity * config.risk.maxRiskPerTrade;
     const riskBasedNotional = (riskAmount / stopDistance) * entryPrice;
 
-    let notionalUsdt = Math.min(riskBasedNotional, maxNotional);
+    const notionalUsdt = Math.min(riskBasedNotional, maxNotional);
 
     if (notionalUsdt < config.trading.minOrderUsdt) {
       logger.warn('Position too small for exchange minimum', {
-        notional: notionalUsdt.toFixed(2),
+        notional: notionalUsdt.toFixed(4),
+        equity: equity.toFixed(4),
         min: config.trading.minOrderUsdt,
       });
       return null;
@@ -103,13 +120,15 @@ export class RiskManager {
         : entryPrice * (1 - takeProfitPercent);
 
     const actualRisk = notionalUsdt * config.risk.stopLossPercent;
-
     const expectedProfit = notionalUsdt * takeProfitPercent;
-    logger.info('Position sized', {
-      notional: `${notionalUsdt.toFixed(2)} USDT`,
-      expectedProfit: `${expectedProfit.toFixed(2)} USDT`,
-      riskAtStop: `${actualRisk.toFixed(2)} USDT`,
-      takeProfitPct: `${(takeProfitPercent * 100).toFixed(1)}%`,
+
+    logger.info('Position sized (capped to bot capital)', {
+      botCapital: `${equity.toFixed(4)} USDT`,
+      walletFree: `${portfolio.freeUsdt.toFixed(4)} USDT`,
+      notional: `${notionalUsdt.toFixed(4)} USDT`,
+      expectedProfitAtTp: `${expectedProfit.toFixed(4)} USDT`,
+      riskAtStop: `${actualRisk.toFixed(4)} USDT`,
+      takeProfitPct: `${(takeProfitPercent * 100).toFixed(2)}%`,
     });
 
     return {

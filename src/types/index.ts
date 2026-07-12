@@ -36,9 +36,7 @@ export interface OpenPosition {
   stopLoss: number;
   takeProfit: number;
   openedAt: number;
-  /** Highest price seen since entry (long) or lowest price seen (short) */
   peakPrice: number;
-  /** Trailing stop price, updated as price moves in our favor */
   trailingStop: number | null;
 }
 
@@ -49,13 +47,9 @@ export interface WalletBalance {
 }
 
 export interface PortfolioBalance extends WalletBalance {
-  /** Base asset symbol, e.g. BTC */
   baseAsset: string;
-  /** Total base asset held (e.g. BTC amount) */
   baseHoldings: number;
-  /** Base asset value converted to USDT */
   baseValueUsdt: number;
-  /** Total portfolio = USDT + base asset value */
   portfolioValueUsdt: number;
 }
 

@@ -11,30 +11,48 @@ export const config = {
   },
   trading: {
     mode: 'spot' as 'spot' | 'futures',
-    // Top 10 liquid USDT pairs — bot scans all and trades the strongest signal
+    // Liquid pairs that move enough for 0.5% scalps.
+    // Includes majors that exist on Binance testnet + mid-caps for live.
     watchlist: [
-      'BTC/USDT',
-      'ETH/USDT',
       'SOL/USDT',
-      'BNB/USDT',
-      'XRP/USDT',
-      'DOGE/USDT',
-      'ADA/USDT',
       'AVAX/USDT',
+      'DOGE/USDT',
       'LINK/USDT',
+      'ADA/USDT',
       'DOT/USDT',
+      'NEAR/USDT',
+      'ATOM/USDT',
+      'APT/USDT',
+      'ARB/USDT',
+      'OP/USDT',
+      'SUI/USDT',
+      'INJ/USDT',
+      'FIL/USDT',
+      'AAVE/USDT',
+      'UNI/USDT',
+      'LDO/USDT',
+      'FET/USDT',
+      'RENDER/USDT',
+      'HBAR/USDT',
     ],
-    /** Candle limits per timeframe (need ≥210 for EMA200) */
-    candleLimit1h:  250,
-    candleLimit15m: 250,
-    candleLimit5m:  250,
-    /** How often to scan in milliseconds (every 5 minutes matches the 5m candle close) */
-    scanIntervalMs: 300000,
+    /** Candle limits per timeframe */
+    candleLimit1h:  120,
+    candleLimit15m: 120,
+    candleLimit5m:  120,
+    /** Scan every 1 minute so setups are not missed */
+    scanIntervalMs: 60000,
     minOrderUsdt: 10,
     maxOpenPositions: 1,
     tradingCapital: 1000,
     /** Max % of trading capital per trade */
     maxPositionPercent: 0.95,
+  },
+  /**
+   * Binance standard maker/taker fee: 0.1% per side = 0.2% round trip.
+   * Applied to every trade even on testnet so P&L reflects real conditions.
+   */
+  commission: {
+    rate: 0.001, // 0.1% per side
   },
   risk: {
     /** Risk per trade as % of capital */
@@ -51,8 +69,11 @@ export const config = {
   position: {
     /** Max hours to hold before time-exit */
     maxHoldHours: 2,
-    /** Minimum strategy confidence score to execute a trade (0–100) */
-    minScore: 95,
+    /**
+     * Minimum confidence score to trade (0–100).
+     * Lower = more trades. Current: active profile for actually trading.
+     */
+    minScore: 55,
   },
   api: {
     // Cloud hosts (Railway, Render) inject PORT automatically
