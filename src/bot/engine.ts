@@ -26,8 +26,8 @@ export class TradingBot {
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   /** Skip pair after SL (ms timestamp) — stops revenge re-entries like LDO twice */
   private symbolCooldownUntil = new Map<string, number>();
-  private static readonly SL_COOLDOWN_MS = 45 * 60 * 1000;
-  private static readonly ANY_EXIT_COOLDOWN_MS = 12 * 60 * 1000;
+  private static readonly SL_COOLDOWN_MS = 30 * 60 * 1000;
+  private static readonly ANY_EXIT_COOLDOWN_MS = 8 * 60 * 1000;
 
   constructor() {
     this.exchange = new ExchangeClient();
@@ -155,13 +155,13 @@ export class TradingBot {
     );
 
     this.store.addEvent('info', 'Bot started', {
-      strategy: 'lower_risk',
+      strategy: 'balanced',
       tradingCapital: config.trading.tradingCapital,
       usdtBalance,
       watchlist: config.trading.watchlist,
     });
 
-    logger.info('Bot started — Lower Risk strategy', {
+    logger.info('Bot started — Balanced strategy', {
       watchlist: config.trading.watchlist.join(', '),
       tradingCapital: `${config.trading.tradingCapital.toFixed(2)} USDT`,
       takeProfit: `+${(config.risk.takeProfitPercent * 100).toFixed(1)}%`,

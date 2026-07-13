@@ -66,8 +66,9 @@ export const config = {
   },
   position: {
     maxHoldHours: 1.5,
-    /** Lower-risk quality gate */
-    minScore: 72,
+    /** Balanced — high enough to skip junk, low enough to take real setups */
+    /** Balanced — still filtered, but reachable during normal sessions */
+    minScore: 55,
   },
   api: {
     // Cloud hosts (Railway, Render) inject PORT automatically
