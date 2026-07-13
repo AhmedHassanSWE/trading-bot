@@ -1,15 +1,19 @@
 /**
- * Strategy: Trend Bias Scalp (Active)
+ * Strategy: Trend Continuation — Lower Risk
  *
- * Goal: actually take trades (not sit idle for days), while keeping:
- *  • Net ~0.5% TP (0.7% gross − 0.2% fees)
- *  • Capital cap at tradingCapital
- *  • Only block clear BTC dumps
+ * Fewer trades, higher quality. Prefer sitting idle over forced entries.
  *
- * Hard rejects only:
+ * Targets:
+ *  • Gross TP 0.8% ≈ ~0.6% net after fees
+ *  • Gross SL 0.35% ≈ ~0.55% net after fees  → slight edge if WR > ~48%
+ *  • Capital capped at tradingCapital
+ *
+ * Hard rejects:
  *  • BTC clearly bearish
- *  • 5m price clearly broken below EMA50
- *  • RSI extreme chase (>75)
+ *  • 1h not holding above EMA50
+ *  • 5m below EMA50
+ *  • Weak volume, no pullback confirmation, RSI chase
+ *  • Not enough room to recent high for full TP
  *  • Score below minScore
  */
 
@@ -88,33 +92,35 @@ export class MediumRiskStrategy {
     const s15m = this.snap(candles15m, false);
 
     if (!s1h) {
-      // Allow trading if BTC data missing (testnet) — don't freeze the bot
       return {
         bias: 'sideways',
         trendStrength: 'weak',
         volatility: 'normal',
         healthy: true,
-        reason: 'BTC data limited — scanning alts anyway',
+        reason: 'BTC data limited — scanning alts carefully',
       };
     }
 
     const bull1h = s1h.price > s1h.ema20 && s1h.ema20 > s1h.ema50;
-    const bear1h = s1h.price < s1h.ema20 && s1h.ema20 < s1h.ema50 && s1h.adx >= 18;
+    const bear1h = s1h.price < s1h.ema20 && s1h.ema20 < s1h.ema50;
+    const bear15 = s15m
+      ? s15m.price < s15m.ema20 && s15m.ema20 < s15m.ema50
+      : false;
 
-    // ONLY hard block: clear bearish trend
-    if (bear1h) {
+    // Hard block: clear bearish structure
+    if (bear1h && (s1h.adx >= 16 || bear15)) {
       return {
         bias: 'bearish',
-        trendStrength: 'strong',
+        trendStrength: s1h.adx >= 20 ? 'strong' : 'moderate',
         volatility: 'normal',
         healthy: false,
-        reason: `BTC clearly bearish — ADX ${s1h.adx.toFixed(1)}`,
+        reason: `BTC bearish — ADX ${s1h.adx.toFixed(1)}`,
       };
     }
 
     if (bull1h) {
       const strength: BitcoinAnalysis['trendStrength'] =
-        s1h.adx >= 22 ? 'strong' : 'moderate';
+        s1h.adx >= 22 ? 'strong' : s1h.adx >= 16 ? 'moderate' : 'weak';
       return {
         bias: 'bullish',
         trendStrength: strength,
@@ -124,14 +130,23 @@ export class MediumRiskStrategy {
       };
     }
 
-    // Sideways / mixed — ALLOW (this was blocking trades for days)
-    const soft15 = s15m ? s15m.price > s15m.ema50 : true;
+    // Sideways: allow only if not dumping on 15m
+    if (bear15 && s1h.price < s1h.ema50) {
+      return {
+        bias: 'bearish',
+        trendStrength: 'moderate',
+        volatility: 'normal',
+        healthy: false,
+        reason: 'BTC soft dump on 15m — pause longs',
+      };
+    }
+
     return {
       bias: 'sideways',
       trendStrength: 'weak',
       volatility: 'normal',
       healthy: true,
-      reason: `BTC mixed/sideways — ADX ${s1h.adx.toFixed(1)}${soft15 ? '' : ', 15m soft'} — still scanning`,
+      reason: `BTC mixed — ADX ${s1h.adx.toFixed(1)} — selective longs only`,
     };
   }
 
@@ -176,35 +191,41 @@ export class MediumRiskStrategy {
     const price = s5m.price;
     const reasons: string[] = [];
 
-    // ATR is informational only — quiet markets often have ATR < TP on 5m
-    // and hard-blocking here caused zero trades for days.
+    // Dead markets: ATR too small to reach TP cleanly
+    if (s5m.atrPct < this.TP_PCT * 0.3) {
+      return noTrade(`ATR too low (${(s5m.atrPct * 100).toFixed(2)}%)`);
+    }
 
     // ── 1. Bitcoin (max 20) ───────────────────────────────────────────────────
     const bitcoinHealth =
-      btc.trendStrength === 'strong' ? 20 : btc.trendStrength === 'moderate' ? 15 : 10;
-    reasons.push(btc.reason);
-
-    // ── 2. Trend (max 20) — soft ──────────────────────────────────────────────
-    let trendQuality = 8;
-    if (s1h) {
-      if (s1h.price > s1h.ema50) trendQuality += 6;
-      else if (s1h.price > s1h.ema50 * 0.98) trendQuality += 3;
-      if (s1h.ema20 >= s1h.ema50) trendQuality += 3;
-      if (s1h.higherHighs || s1h.higherLows) trendQuality += 2;
-      // Only reject deep 1h breakdown
-      if (s1h.price < s1h.ema50 * 0.97) {
-        return noTrade('1h deep breakdown below EMA50');
-      }
+      btc.trendStrength === 'strong' ? 20 : btc.trendStrength === 'moderate' ? 15 : 8;
+    if (btc.bias === 'sideways') {
+      // Lower risk: sideways BTC gets less credit
+      reasons.push(`${btc.reason} (sideways discount)`);
+    } else {
+      reasons.push(btc.reason);
     }
-    if (s15m && s15m.price > s15m.ema50) trendQuality += 2;
+
+    // ── 2. Trend (max 20) ─────────────────────────────────────────────────────
+    if (!s1h || s1h.price < s1h.ema50) {
+      return noTrade('1h below EMA50 — no long bias');
+    }
+
+    let trendQuality = 6;
+    if (s1h.price > s1h.ema50) trendQuality += 6;
+    if (s1h.ema20 >= s1h.ema50) trendQuality += 4;
+    if (s1h.higherHighs && s1h.higherLows) trendQuality += 3;
+    else if (s1h.higherHighs || s1h.higherLows) trendQuality += 1;
+    if (s15m && s15m.price > s15m.ema50) trendQuality += 1;
+    else if (s15m && s15m.price < s15m.ema50 * 0.99) {
+      return noTrade('15m broken below EMA50');
+    }
     trendQuality = Math.min(20, trendQuality);
     reasons.push(`Trend ${trendQuality}/20`);
 
     // ── 3. EMA 5m (max 15) ────────────────────────────────────────────────────
-    // Allow mild dips under EMA50 if still near it and buyers returning
-    const nearEma50 = s5m.price >= s5m.ema50 * 0.995;
-    if (!nearEma50 && s5m.price < s5m.ema20) {
-      return noTrade(`5m too far below EMAs`);
+    if (s5m.price < s5m.ema50) {
+      return noTrade('5m below EMA50');
     }
 
     let emaAlignment = 0;
@@ -212,24 +233,28 @@ export class MediumRiskStrategy {
       emaAlignment = 15;
       reasons.push('Full 5m EMA stack');
     } else if (s5m.price > s5m.ema20) {
-      emaAlignment = 12;
+      emaAlignment = 11;
       reasons.push('Price above EMA20');
-    } else if (nearEma50) {
-      emaAlignment = 9;
-      reasons.push('Pullback into EMA50 zone');
     } else {
-      emaAlignment = 7;
-      reasons.push('Soft EMA structure');
+      // Between EMA20 and EMA50 — only if tight to EMA20 (real pullback)
+      if (s5m.price < s5m.ema20 * 0.997) {
+        return noTrade('5m pullback too deep under EMA20');
+      }
+      emaAlignment = 8;
+      reasons.push('Pullback into EMA20–50');
     }
 
-    // ── 4. Entry / pullback (max 15) — flexible ───────────────────────────────
-    if (s5m.rsi > 75) {
+    // ── 4. Entry / pullback (max 15) ──────────────────────────────────────────
+    if (s5m.rsi > 68) {
       return noTrade(`RSI too hot (${s5m.rsi.toFixed(1)})`);
+    }
+    if (s5m.rsi < 35) {
+      return noTrade(`RSI too weak (${s5m.rsi.toFixed(1)})`);
     }
 
     const bodyPct =
       Math.abs(s5m.lastCandle.close - s5m.lastCandle.open) / s5m.lastCandle.open;
-    if (bodyPct > 0.02) {
+    if (bodyPct > 0.012) {
       return noTrade(`Candle too extended (${(bodyPct * 100).toFixed(2)}%)`);
     }
 
@@ -237,72 +262,79 @@ export class MediumRiskStrategy {
     const prevBear = s5m.prevCandle.close < s5m.prevCandle.open;
     const macdRising = s5m.macdHist > s5m.macdHistPrev;
     const rsiRising = s5m.rsi > s5m.prevRsi;
+    const nearEma =
+      s5m.price <= s5m.ema20 * 1.004 || s5m.price <= s5m.ema50 * 1.006;
 
     let pullbackQuality: number;
-    if (lastBull && prevBear) {
+    if (lastBull && prevBear && nearEma) {
       pullbackQuality = 15;
-      reasons.push('Candle flip entry');
-    } else if (lastBull && (macdRising || rsiRising)) {
+      reasons.push('Pullback flip at EMA');
+    } else if (lastBull && prevBear) {
       pullbackQuality = 12;
-      reasons.push(`Bullish continuation — RSI ${s5m.rsi.toFixed(1)}`);
-    } else if (macdRising && rsiRising) {
-      pullbackQuality = 10;
-      reasons.push('Momentum turning up');
-    } else if (lastBull) {
+      reasons.push('Candle flip entry');
+    } else if (lastBull && nearEma && (macdRising || rsiRising)) {
+      pullbackQuality = 11;
+      reasons.push(`EMA bounce — RSI ${s5m.rsi.toFixed(1)}`);
+    } else if (lastBull && macdRising && rsiRising && s5m.rsi <= 60) {
       pullbackQuality = 9;
-      reasons.push('Bullish candle');
-    } else if (s5m.price > s5m.ema50 && rsiRising) {
-      pullbackQuality = 7;
-      reasons.push('Holding structure, RSI rising');
+      reasons.push('Controlled continuation');
     } else {
-      return noTrade('No bullish/momentum confirmation yet');
+      return noTrade('No clean pullback confirmation');
     }
 
     // ── 5. Volume (max 15) ────────────────────────────────────────────────────
-    let volumeConfirmation: number;
-    if (s5m.volumeRatio >= 1.1) {
-      volumeConfirmation = 15;
-      reasons.push(`Volume ${s5m.volumeRatio.toFixed(2)}x`);
-    } else if (s5m.volumeRatio >= 0.7) {
-      volumeConfirmation = 11;
-      reasons.push(`Volume ${s5m.volumeRatio.toFixed(2)}x`);
-    } else if (s5m.volumeRatio >= 0.4) {
-      volumeConfirmation = 7;
-      reasons.push(`Light volume ${s5m.volumeRatio.toFixed(2)}x`);
-    } else {
-      volumeConfirmation = 4;
-      reasons.push(`Thin volume ${s5m.volumeRatio.toFixed(2)}x`);
+    if (s5m.volumeRatio < 0.65) {
+      return noTrade(`Volume too thin (${s5m.volumeRatio.toFixed(2)}x)`);
     }
 
-    // ── 6. Resistance (max 10) ─────────────────────────────────────────────────
+    let volumeConfirmation: number;
+    if (s5m.volumeRatio >= 1.2) {
+      volumeConfirmation = 15;
+      reasons.push(`Volume ${s5m.volumeRatio.toFixed(2)}x`);
+    } else if (s5m.volumeRatio >= 0.9) {
+      volumeConfirmation = 12;
+      reasons.push(`Volume ${s5m.volumeRatio.toFixed(2)}x`);
+    } else {
+      volumeConfirmation = 8;
+      reasons.push(`Volume ${s5m.volumeRatio.toFixed(2)}x`);
+    }
+
+    // ── 6. Resistance (max 10) — need full TP room ────────────────────────────
     const resistance = Math.max(...s5m.recentHighs.slice(-24));
     const distToRes = (resistance - price) / price;
 
-    // Soft: need at least ~half TP room; prefer full TP
-    if (distToRes < this.TP_PCT * 0.5) {
-      return noTrade(`Almost no room to resistance (${(distToRes * 100).toFixed(2)}%)`);
+    if (distToRes < this.TP_PCT) {
+      return noTrade(`Not enough room to high (${(distToRes * 100).toFixed(2)}% < TP)`);
     }
 
-    let resistanceDistance: number;
-    if (distToRes >= this.TP_PCT) {
-      resistanceDistance = 10;
-      reasons.push(`Room ${(distToRes * 100).toFixed(2)}%`);
-    } else {
-      resistanceDistance = 6;
-      reasons.push(`Tight room ${(distToRes * 100).toFixed(2)}%`);
-    }
+    const resistanceDistance = distToRes >= this.TP_PCT * 1.4 ? 10 : 7;
+    reasons.push(`Room ${(distToRes * 100).toFixed(2)}%`);
 
     // ── 7. ADX / momentum (max 5) ─────────────────────────────────────────────
-    let momentumAdx = 2;
+    let momentumAdx = 1;
     if (s5m.adx >= 18 && macdRising) {
       momentumAdx = 5;
       reasons.push(`ADX ${s5m.adx.toFixed(1)} + MACD↑`);
-    } else if (s5m.adx >= 12 || macdRising) {
+    } else if (s5m.adx >= 14) {
       momentumAdx = 3;
       reasons.push(`ADX ${s5m.adx.toFixed(1)}`);
+    } else if (s5m.adx < 12 && !macdRising) {
+      return noTrade(`No momentum (ADX ${s5m.adx.toFixed(1)})`);
     } else {
       reasons.push(`ADX ${s5m.adx.toFixed(1)}`);
     }
+
+    // Sideways BTC: require stronger coin setup
+    const sidewaysPenalty = btc.bias === 'sideways' ? 4 : 0;
+    const rawTotal =
+      bitcoinHealth +
+      trendQuality +
+      emaAlignment +
+      pullbackQuality +
+      volumeConfirmation +
+      resistanceDistance +
+      momentumAdx -
+      sidewaysPenalty;
 
     const scoreBreakdown: ScoreBreakdown = {
       bitcoinHealth,
@@ -312,14 +344,7 @@ export class MediumRiskStrategy {
       volumeConfirmation,
       resistanceDistance,
       momentumAdx,
-      total:
-        bitcoinHealth +
-        trendQuality +
-        emaAlignment +
-        pullbackQuality +
-        volumeConfirmation +
-        resistanceDistance +
-        momentumAdx,
+      total: Math.max(0, rawTotal),
     };
 
     const score = scoreBreakdown.total;
@@ -355,7 +380,7 @@ export class MediumRiskStrategy {
       takeProfit,
       stopLoss,
       riskReward: `+${(this.TP_PCT * 100).toFixed(2)}% gross (~${((this.TP_PCT - 0.002) * 100).toFixed(2)}% net) / -${(this.SL_PCT * 100).toFixed(2)}%`,
-      trend: 'Active trend scalp',
+      trend: 'Lower-risk trend continuation',
       bitcoinStatus: btc.reason,
       reasons,
       rejections: [],

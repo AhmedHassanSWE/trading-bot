@@ -24,6 +24,10 @@ export class TradingBot {
   private running = false;
   private exchangeInitialized = false;
   private scanTimer: ReturnType<typeof setInterval> | null = null;
+  /** Skip pair after SL (ms timestamp) — stops revenge re-entries like LDO twice */
+  private symbolCooldownUntil = new Map<string, number>();
+  private static readonly SL_COOLDOWN_MS = 45 * 60 * 1000;
+  private static readonly ANY_EXIT_COOLDOWN_MS = 12 * 60 * 1000;
 
   constructor() {
     this.exchange = new ExchangeClient();
@@ -151,13 +155,13 @@ export class TradingBot {
     );
 
     this.store.addEvent('info', 'Bot started', {
-      strategy: 'medium_risk',
+      strategy: 'lower_risk',
       tradingCapital: config.trading.tradingCapital,
       usdtBalance,
       watchlist: config.trading.watchlist,
     });
 
-    logger.info('Bot started — Medium Risk strategy', {
+    logger.info('Bot started — Lower Risk strategy', {
       watchlist: config.trading.watchlist.join(', '),
       tradingCapital: `${config.trading.tradingCapital.toFixed(2)} USDT`,
       takeProfit: `+${(config.risk.takeProfitPercent * 100).toFixed(1)}%`,
@@ -200,20 +204,32 @@ export class TradingBot {
     }
 
     const { btcCandles1h, btcCandles15m, coins } = await this.fetchAllCandles();
-    const { best, all } = this.strategy.findBestOpportunity(
+    const { all } = this.strategy.findBestOpportunity(
       coins,
       btcCandles1h,
       btcCandles15m
     );
 
+    const now = Date.now();
+    const best =
+      all.find(
+        (r) =>
+          r.shouldTrade && now >= (this.symbolCooldownUntil.get(r.symbol) ?? 0)
+      ) ?? null;
+
     this.lastOpportunity = best;
 
     if (!best || !best.shouldTrade) {
       const top = all[0];
+      const cooled = all.find(
+        (r) => r.shouldTrade && now < (this.symbolCooldownUntil.get(r.symbol) ?? 0)
+      );
       this.lastSignal = {
         signal: 'none',
         price: top?.entryPrice ?? 0,
-        reason: top?.rejections[0] ?? 'No qualifying setup',
+        reason: cooled
+          ? `${cooled.symbol} on cooldown after recent exit`
+          : top?.rejections[0] ?? 'No qualifying setup',
         strength: (top?.score ?? 0) / 100,
         symbol: top?.symbol,
       };
@@ -485,6 +501,12 @@ export class TradingBot {
     } catch (err) {
       logger.error('Failed to close position', { symbol: pos.symbol, error: String(err) });
     } finally {
+      const coolMs =
+        reason === 'stop_loss'
+          ? TradingBot.SL_COOLDOWN_MS
+          : TradingBot.ANY_EXIT_COOLDOWN_MS;
+      this.symbolCooldownUntil.set(pos.symbol, Date.now() + coolMs);
+      logger.info(`${pos.symbol} cooldown ${(coolMs / 60000).toFixed(0)}m after ${reason}`);
       this.openPosition = null;
     }
   }

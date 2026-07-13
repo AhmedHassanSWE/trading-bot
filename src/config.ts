@@ -44,8 +44,8 @@ export const config = {
     minOrderUsdt: 10,
     maxOpenPositions: 1,
     tradingCapital: 1000,
-    /** Max % of trading capital per trade (was 0.95 — one loss hurt too much) */
-    maxPositionPercent: 0.85,
+    /** Lower risk: half capital per trade so one SL doesn't wreck the day */
+    maxPositionPercent: 0.45,
   },
   /**
    * Binance standard maker/taker fee: 0.1% per side = 0.2% round trip.
@@ -55,18 +55,19 @@ export const config = {
     rate: 0.001, // 0.1% per side
   },
   risk: {
-    maxRiskPerTrade: 0.005,
-    /** 0.7% gross ≈ 0.5% net after fees */
-    takeProfitPercent: 0.007,
-    stopLossPercent: 0.0045,
-    maxDailyLossPercent: 0.03,
-    trailingActivationPercent: 1.0,
-    trailingStopPercent: 0.003,
+    maxRiskPerTrade: 0.003,
+    /** 0.8% gross ≈ 0.6% net; 0.35% SL ≈ 0.55% net — slight edge after fees */
+    takeProfitPercent: 0.008,
+    stopLossPercent: 0.0035,
+    maxDailyLossPercent: 0.02,
+    /** Was 1.0 (100% — never activated). Lock gains after +0.45%. */
+    trailingActivationPercent: 0.0045,
+    trailingStopPercent: 0.002,
   },
   position: {
-    maxHoldHours: 2,
-    /** Active profile — aimed at taking trades in quiet markets */
-    minScore: 55,
+    maxHoldHours: 1.5,
+    /** Lower-risk quality gate */
+    minScore: 72,
   },
   api: {
     // Cloud hosts (Railway, Render) inject PORT automatically
