@@ -26,8 +26,8 @@ export class TradingBot {
   private scanTimer: ReturnType<typeof setInterval> | null = null;
   /** Skip pair after SL (ms timestamp) — stops revenge re-entries like LDO twice */
   private symbolCooldownUntil = new Map<string, number>();
-  private static readonly SL_COOLDOWN_MS = 30 * 60 * 1000;
-  private static readonly ANY_EXIT_COOLDOWN_MS = 8 * 60 * 1000;
+  private static readonly SL_COOLDOWN_MS = 6 * 60 * 60 * 1000; // 6h after SL
+  private static readonly ANY_EXIT_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2h after any exit
 
   constructor() {
     this.exchange = new ExchangeClient();
@@ -155,13 +155,13 @@ export class TradingBot {
     );
 
     this.store.addEvent('info', 'Bot started', {
-      strategy: 'balanced',
+      strategy: '4h_trend_pullback_swing',
       tradingCapital: config.trading.tradingCapital,
       usdtBalance,
       watchlist: config.trading.watchlist,
     });
 
-    logger.info('Bot started — Balanced strategy', {
+    logger.info('Bot started — 4H Trend Pullback Swing', {
       watchlist: config.trading.watchlist.join(', '),
       tradingCapital: `${config.trading.tradingCapital.toFixed(2)} USDT`,
       takeProfit: `+${(config.risk.takeProfitPercent * 100).toFixed(1)}%`,
@@ -203,11 +203,11 @@ export class TradingBot {
       return;
     }
 
-    const { btcCandles1h, btcCandles15m, coins } = await this.fetchAllCandles();
+    const { btcCandles4h, btcCandles1h, coins } = await this.fetchAllCandles();
     const { all } = this.strategy.findBestOpportunity(
       coins,
-      btcCandles1h,
-      btcCandles15m
+      btcCandles4h,
+      btcCandles1h
     );
 
     const now = Date.now();
@@ -257,13 +257,13 @@ export class TradingBot {
   }
 
   private async fetchAllCandles(): Promise<{
+    btcCandles4h: Candle[];
     btcCandles1h: Candle[];
-    btcCandles15m: Candle[];
     coins: { symbol: string; tf: MultiTimeframeCandles }[];
   }> {
-    const [btcCandles1h, btcCandles15m] = await Promise.all([
+    const [btcCandles4h, btcCandles1h] = await Promise.all([
+      this.exchange.fetchCandles('BTC/USDT', config.trading.candleLimit4h, '4h').catch(() => []),
       this.exchange.fetchCandles('BTC/USDT', config.trading.candleLimit1h, '1h').catch(() => []),
-      this.exchange.fetchCandles('BTC/USDT', config.trading.candleLimit15m, '15m').catch(() => []),
     ]);
 
     const watchlist = [...config.trading.watchlist];
@@ -271,9 +271,8 @@ export class TradingBot {
       watchlist.map(async (symbol): Promise<{ symbol: string; tf: MultiTimeframeCandles }> => ({
         symbol,
         tf: {
+          candles4h: await this.exchange.fetchCandles(symbol, config.trading.candleLimit4h, '4h'),
           candles1h: await this.exchange.fetchCandles(symbol, config.trading.candleLimit1h, '1h'),
-          candles15m: await this.exchange.fetchCandles(symbol, config.trading.candleLimit15m, '15m'),
-          candles5m: await this.exchange.fetchCandles(symbol, config.trading.candleLimit5m, '5m'),
         },
       }))
     );
@@ -285,7 +284,7 @@ export class TradingBot {
           (r as PromiseFulfilledResult<{ symbol: string; tf: MultiTimeframeCandles }>).value
       );
 
-    return { btcCandles1h, btcCandles15m, coins };
+    return { btcCandles4h, btcCandles1h, coins };
   }
 
   private async openTrade(

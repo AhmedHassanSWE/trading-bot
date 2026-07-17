@@ -11,67 +11,52 @@ export const config = {
   },
   trading: {
     mode: 'spot' as 'spot' | 'futures',
-    // Liquid pairs that move enough for 0.5% scalps.
-    // Includes majors that exist on Binance testnet + mid-caps for live.
+    /** Liquid majors — better for multi-hour swings than thin mid-caps */
     watchlist: [
       'SOL/USDT',
       'AVAX/USDT',
-      'DOGE/USDT',
       'LINK/USDT',
       'ADA/USDT',
       'DOT/USDT',
       'NEAR/USDT',
       'ATOM/USDT',
       'APT/USDT',
-      'ARB/USDT',
-      'OP/USDT',
       'SUI/USDT',
       'INJ/USDT',
-      'FIL/USDT',
       'AAVE/USDT',
       'UNI/USDT',
-      'LDO/USDT',
-      'FET/USDT',
-      'RENDER/USDT',
-      'HBAR/USDT',
     ],
-    /** Candle limits per timeframe */
-    candleLimit1h:  120,
-    candleLimit15m: 120,
-    candleLimit5m:  120,
-    /** Scan every 1 minute so setups are not missed */
-    scanIntervalMs: 60000,
+    candleLimit4h: 120,
+    candleLimit1h: 120,
+    /** Check every 5 minutes — setups are 1h/4h, not 5m noise */
+    scanIntervalMs: 300000,
     minOrderUsdt: 10,
     maxOpenPositions: 1,
     tradingCapital: 1000,
-    /** Lower risk: half capital per trade so one SL doesn't wreck the day */
-    maxPositionPercent: 0.45,
+    /** Smaller size — one SL shouldn't erase a week of wins */
+    maxPositionPercent: 0.35,
   },
-  /**
-   * Binance standard maker/taker fee: 0.1% per side = 0.2% round trip.
-   * Applied to every trade even on testnet so P&L reflects real conditions.
-   */
   commission: {
     rate: 0.001, // 0.1% per side
   },
   risk: {
-    maxRiskPerTrade: 0.003,
-    /** 0.8% gross ≈ 0.6% net; 0.35% SL ≈ 0.55% net — slight edge after fees */
-    takeProfitPercent: 0.008,
-    stopLossPercent: 0.0035,
-    maxDailyLossPercent: 0.02,
-    /** Was 1.0 (100% — never activated). Lock gains after +0.45%. */
-    trailingActivationPercent: 0.0045,
-    trailingStopPercent: 0.002,
+    /** Risk ~1% of capital per trade */
+    maxRiskPerTrade: 0.01,
+    /** Swing targets: fees are tiny vs move size */
+    takeProfitPercent: 0.035,
+    stopLossPercent: 0.015,
+    maxDailyLossPercent: 0.04,
+    /** Lock gains after +2%; trail 0.8% — don't cut winners at +0.3% */
+    trailingActivationPercent: 0.02,
+    trailingStopPercent: 0.008,
   },
   position: {
-    maxHoldHours: 1.5,
-    /** Balanced — high enough to skip junk, low enough to take real setups */
-    /** Balanced — still filtered, but reachable during normal sessions */
-    minScore: 55,
+    /** Allow multi-hour / overnight holds */
+    maxHoldHours: 36,
+    /** Selective — fewer trades, higher quality */
+    minScore: 70,
   },
   api: {
-    // Cloud hosts (Railway, Render) inject PORT automatically
     port: Number(process.env.PORT) || 3000,
   },
 } as const;

@@ -25,21 +25,36 @@ async function main() {
   const strategy = new MediumRiskStrategy();
   const watchlist = [...config.trading.watchlist];
 
-  const btc1h = await fetchTf(ex, 'BTC/USDT', '1h', 120);
-  const btc15 = await fetchTf(ex, 'BTC/USDT', '15m', 120);
-  const btc = strategy.analyzeBitcoin(btc1h, btc15);
+  const btc4h = await fetchTf(ex, 'BTC/USDT', '4h', config.trading.candleLimit4h);
+  const btc1h = await fetchTf(ex, 'BTC/USDT', '1h', config.trading.candleLimit1h);
+  const btc = strategy.analyzeBitcoin(btc4h, btc1h);
 
-  console.log('\n=== STRATEGY LIVE SCAN (mainnet public data) ===\n');
+  console.log('\n=== 4H TREND PULLBACK SWING (mainnet public data) ===\n');
   console.log('BTC:', btc.reason, '| healthy=', btc.healthy);
-  console.log('Config: TP gross', (config.risk.takeProfitPercent * 100).toFixed(2) + '%',
-    '| SL', (config.risk.stopLossPercent * 100).toFixed(2) + '%',
-    '| minScore', config.position.minScore);
-  console.log('Net TP after 0.2% fees ≈', ((config.risk.takeProfitPercent - 0.002) * 100).toFixed(2) + '%');
-  console.log('Net SL after fees ≈', ((config.risk.stopLossPercent + 0.002) * 100).toFixed(2) + '%');
-  console.log('Breakeven win rate needed ≈',
+  console.log(
+    'Config: TP gross',
+    (config.risk.takeProfitPercent * 100).toFixed(2) + '%',
+    '| SL',
+    (config.risk.stopLossPercent * 100).toFixed(2) + '%',
+    '| minScore',
+    config.position.minScore
+  );
+  console.log(
+    'Net TP after 0.2% fees ≈',
+    ((config.risk.takeProfitPercent - 0.002) * 100).toFixed(2) + '%'
+  );
+  console.log(
+    'Net SL after fees ≈',
+    ((config.risk.stopLossPercent + 0.002) * 100).toFixed(2) + '%'
+  );
+  console.log(
+    'Breakeven win rate needed ≈',
     (
       ((config.risk.stopLossPercent + 0.002) /
-        (config.risk.takeProfitPercent - 0.002 + config.risk.stopLossPercent + 0.002)) *
+        (config.risk.takeProfitPercent -
+          0.002 +
+          config.risk.stopLossPercent +
+          0.002)) *
       100
     ).toFixed(1) + '%\n'
   );
@@ -56,18 +71,17 @@ async function main() {
         console.log(symbol, '— not listed, skip');
         continue;
       }
-      const [candles1h, candles15m, candles5m] = await Promise.all([
-        fetchTf(ex, symbol, '1h', 120),
-        fetchTf(ex, symbol, '15m', 120),
-        fetchTf(ex, symbol, '5m', 120),
+      const [candles4h, candles1h] = await Promise.all([
+        fetchTf(ex, symbol, '4h', config.trading.candleLimit4h),
+        fetchTf(ex, symbol, '1h', config.trading.candleLimit1h),
       ]);
-      coins.push({ symbol, tf: { candles1h, candles15m, candles5m } });
+      coins.push({ symbol, tf: { candles4h, candles1h } });
     } catch (e) {
       console.log(symbol, 'fetch error', String(e));
     }
   }
 
-  const { best, all } = strategy.findBestOpportunity(coins, btc1h, btc15);
+  const { best, all } = strategy.findBestOpportunity(coins, btc4h, btc1h);
 
   console.log('--- Results (sorted by score) ---\n');
   for (const o of all) {
@@ -76,7 +90,7 @@ async function main() {
       `${mark} ${o.symbol.padEnd(12)} score=${String(o.score).padStart(3)} | ${o.summary}`
     );
     if (o.shouldTrade) {
-      console.log('       reasons:', o.reasons.slice(0, 4).join(' · '));
+      console.log('       reasons:', o.reasons.slice(0, 5).join(' · '));
     } else if (o.rejections[0]) {
       console.log('       reject:', o.rejections[0]);
     }
@@ -86,21 +100,11 @@ async function main() {
   console.log('\n=== SUMMARY ===');
   console.log('Scanned:', all.length);
   console.log('Would TRADE now:', tradeable.length);
-  console.log('Best:', best ? `${best.symbol} score ${best.score}` : 'none');
-
-  // Weakness heuristics on tradeable set
-  let chase = 0;
-  let nearHigh = 0;
-  let softPullback = 0;
-  for (const o of tradeable) {
-    if (o.scoreBreakdown.pullbackQuality <= 8) softPullback++;
-    if (o.scoreBreakdown.resistanceDistance <= 4) nearHigh++;
-    if (o.reasons.some((r) => r.includes('Holding above EMA20') || r.includes('Soft entry'))) chase++;
-  }
-  console.log('\nAmong tradeable setups:');
-  console.log('- Soft/no real pullback (≤8 pts):', softPullback);
-  console.log('- Near local high (≤4 res pts):', nearHigh);
-  console.log('- Chase-like reasons:', chase);
+  console.log(
+    'Best:',
+    best ? `${best.symbol} score ${best.score}` : 'none'
+  );
+  console.log('');
 }
 
 main().catch((e) => {
